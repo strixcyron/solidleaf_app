@@ -147,11 +147,12 @@ class LauncherController extends ChangeNotifier {
     return path.join(base, relative);
   }
 
-  Future<String> _runShizukuCmd(String command) async {
+  Future<Map<String, dynamic>> _runShizukuCmd(String command) async {
     try {
       final methodChannel = MethodChannel(shizukuChannel);
-      final result = await methodChannel.invokeMethod<String>('executeShellCommand', command);
-      return result ?? '';
+      final result = await methodChannel.invokeMethod<Map>('executeShellCommand', command);
+      if (result == null) return {'exitCode': -1, 'stdout': '', 'stderr': 'no result'};
+      return Map<String, dynamic>.from(result.cast<String, dynamic>());
     } on PlatformException catch (e) {
       addLog('Shizuku command failed: ${e.message ?? 'unknown'}');
       rethrow;
@@ -162,8 +163,8 @@ class LauncherController extends ChangeNotifier {
     try {
       final dstDir = path.dirname(dst);
       await _runShizukuCmd('mkdir -p "${dstDir}"');
-      await _runShizukuCmd('cp -a "${src}" "${dst}"');
-      addLog('Shizuku copy result: src=$src dst=$dst');
+      final res = await _runShizukuCmd('cp -a "${src}" "${dst}"');
+      addLog('Shizuku copy result: src=$src dst=$dst exit=${res['exitCode']} stderr=${res['stderr']}');
     } catch (e) {
       addLog('Shizuku copy failed: ${e.toString()}');
       rethrow;
@@ -172,7 +173,8 @@ class LauncherController extends ChangeNotifier {
 
   Future<bool> _shizukuExists(String checkPath) async {
     try {
-      final out = await _runShizukuCmd('sh -c "[ -e \"${checkPath}\" ] && echo exists || echo missing"');
+      final outMap = await _runShizukuCmd('sh -c "[ -e \"${checkPath}\" ] && echo exists || echo missing"');
+      final out = (outMap['stdout'] ?? '').toString();
       return out.toLowerCase().contains('exists');
     } catch (e) {
       addLog('Shizuku exists check failed: ${e.toString()}');

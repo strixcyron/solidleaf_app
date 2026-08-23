@@ -31,7 +31,8 @@ class MainActivity : FlutterActivity() {
                 }
                 "executeShellCommand" -> {
                     val command = call.arguments as? String ?: ""
-                    result.success(runShellCommand(command))
+                    val res = runShellCommand(command)
+                    result.success(res)
                 }
                 else -> result.notImplemented()
             }
@@ -48,11 +49,22 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun checkShizukuPermission(): Boolean {
-        // Best-effort: try calling a harmless command through Shizuku; if it succeeds assume permission granted
         if (!isShizukuAvailable()) return false
         return try {
-            val test = runShellCommand("id")
-            !test.contains("Error")
+            // Use reflection so this file can compile even if Shizuku API classes are not present at compile time.
+            val shizukuClass = try {
+                Class.forName("moe.shizuku.api.Shizuku")
+            } catch (e: ClassNotFoundException) {
+                try {
+                    Class.forName("dev.rikka.shizuku.api.Shizuku")
+                } catch (e2: ClassNotFoundException) {
+                    null
+                }
+            }
+            if (shizukuClass == null) return false
+            val method = shizukuClass.getMethod("checkSelfPermission")
+            val res = method.invoke(null) as Int
+            res == android.content.pm.PackageManager.PERMISSION_GRANTED
         } catch (_: Exception) {
             false
         }
@@ -60,39 +72,97 @@ class MainActivity : FlutterActivity() {
 
     private fun requestShizukuPermission() {
         try {
-            // Try to open Shizuku manager permission request activity
             val intent = Intent("moe.shizuku.manager.ACTION_REQUEST_PERMISSION")
             intent.setPackage("moe.shizuku.manager")
             startActivityForResult(intent, REQUEST_SHIZUKU)
         } catch (e: Exception) {
-            // Fallback: try to open Shizuku app
             try {
                 val launch = packageManager.getLaunchIntentForPackage("moe.shizuku.manager")
                 if (launch != null) startActivity(launch)
             } catch (_: Exception) {
-                // ignore
             }
         }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        // Nothing to do here; Dart side will re-check permission state via checkPermission
     }
 
-    private fun runShellCommand(command: String): String {
-        return try {
-            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
-            val output = StringBuilder()
-            val reader = BufferedReader(InputStreamReader(process.inputStream))
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                output.append(line).append(System.lineSeparator())
+    private fun runShellCommand(command: String): Map<String, Any?> {
+        try {
+            // Try to use Shizuku via reflection (so compile-time dependency is not required).
+            val shizukuClass = try {
+                Class.forName("moe.shizuku.api.Shizuku")
+            } catch (e: ClassNotFoundException) {
+                try {
+                    Class.forName("dev.rikka.shizuku.api.Shizuku")
+                } catch (e2: ClassNotFoundException) {
+                    null
+                }
             }
-            process.waitFor()
-            output.toString()
+
+            if (shizukuClass != null) {
+                try {
+                    val checkMethod = shizukuClass.getMethod("checkSelfPermission")
+                    val perm = checkMethod.invoke(null) as Int
+                    if (perm == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        val newProcessMethod = shizukuClass.getMethod("newProcess", Array<String>::class.java, java.io.File::class.java, java.io.File::class.java)
+                        val process = newProcessMethod.invoke(null, arrayOf("sh", "-c", command), null, null) as Process
+
+                        val stdout = StringBuilder()
+                        val stderr = StringBuilder()
+
+                        val outReader = BufferedReader(InputStreamReader(process.inputStream))
+                        var line: String?
+                        while (outReader.readLine().also { line = it } != null) {
+                            stdout.append(line).append("\n")
+                        }
+
+                        val errReader = BufferedReader(InputStreamReader(process.errorStream))
+                        while (errReader.readLine().also { line = it } != null) {
+                            stderr.append(line).append("\n")
+                        }
+
+                        val exitCode = process.waitFor()
+                        val map: MutableMap<String, Any?> = HashMap()
+                        map["exitCode"] = exitCode
+                        map["stdout"] = stdout.toString()
+                        map["stderr"] = stderr.toString()
+                        return map
+                    }
+                } catch (_: Exception) {
+                    // If reflection call fails, fall through to normal exec fallback below.
+                }
+            }
+
+            // Fallback to normal process execution
+            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+            val stdout = StringBuilder()
+            val stderr = StringBuilder()
+
+            val outReader = BufferedReader(InputStreamReader(process.inputStream))
+            var line: String?
+            while (outReader.readLine().also { line = it } != null) {
+                stdout.append(line).append("\n")
+            }
+
+            val errReader = BufferedReader(InputStreamReader(process.errorStream))
+            while (errReader.readLine().also { line = it } != null) {
+                stderr.append(line).append("\n")
+            }
+
+            val exitCode = process.waitFor()
+            val map: MutableMap<String, Any?> = HashMap()
+            map["exitCode"] = exitCode
+            map["stdout"] = stdout.toString()
+            map["stderr"] = stderr.toString()
+            return map
         } catch (ex: Exception) {
-            ex.message ?: "Ошибка выполнения shell-команды"
+            val map: MutableMap<String, Any?> = HashMap()
+            map["exitCode"] = -1
+            map["stdout"] = ""
+            map["stderr"] = ex.message ?: "Ошибка выполнения shell-команды"
+            return map
         }
     }
 }
