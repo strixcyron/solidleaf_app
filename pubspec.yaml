@@ -1,0 +1,21 @@
+name: re_1999_solidleaf
+
+environment:
+  sdk: '^3.13.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  archive: ^4.0.0
+  dio: ^5.7.0
+  file_picker: ^8.0.0
+  fluentui_system_icons: ^1.1.231
+  path_provider: ^2.1.5
+  provider: ^6.1.2
+  shared_preferences: ^2.3.1
+  window_manager: ^0.4.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
