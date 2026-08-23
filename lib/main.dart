@@ -149,10 +149,19 @@ class LauncherController extends ChangeNotifier {
 
   Future<Map<String, dynamic>> _runShizukuCmd(String command) async {
     try {
-      final methodChannel = MethodChannel(shizukuChannel);
+      const methodChannel = MethodChannel(shizukuChannel);
       final result = await methodChannel.invokeMethod<Map>('executeShellCommand', command);
-      if (result == null) return {'exitCode': -1, 'stdout': '', 'stderr': 'no result'};
-      return Map<String, dynamic>.from(result.cast<String, dynamic>());
+      if (result == null) throw Exception('Shizuku command returned no result');
+      final map = Map<String, dynamic>.from(result.cast<String, dynamic>());
+      final exitCodeRaw = map['exitCode'];
+      final exitCode = exitCodeRaw is int ? exitCodeRaw : int.tryParse(exitCodeRaw?.toString() ?? '') ?? -1;
+      if (exitCode != 0) {
+        final stderr = (map['stderr'] ?? '').toString();
+        final stdout = (map['stdout'] ?? '').toString();
+        addLog('Shizuku command failed (exitCode=$exitCode): $stderr');
+        throw Exception('Shizuku command failed: ${stderr.isNotEmpty ? stderr : stdout}');
+      }
+      return map;
     } on PlatformException catch (e) {
       addLog('Shizuku command failed: ${e.message ?? 'unknown'}');
       rethrow;
@@ -162,8 +171,8 @@ class LauncherController extends ChangeNotifier {
   Future<void> _runShizukuCopy(String src, String dst) async {
     try {
       final dstDir = path.dirname(dst);
-      await _runShizukuCmd('mkdir -p "${dstDir}"');
-      final res = await _runShizukuCmd('cp -a "${src}" "${dst}"');
+      await _runShizukuCmd('mkdir -p "$dstDir"');
+      final res = await _runShizukuCmd('cp -a "$src" "$dst"');
       addLog('Shizuku copy result: src=$src dst=$dst exit=${res['exitCode']} stderr=${res['stderr']}');
     } catch (e) {
       addLog('Shizuku copy failed: ${e.toString()}');
@@ -173,7 +182,7 @@ class LauncherController extends ChangeNotifier {
 
   Future<bool> _shizukuExists(String checkPath) async {
     try {
-      final outMap = await _runShizukuCmd('sh -c "[ -e \"${checkPath}\" ] && echo exists || echo missing"');
+      final outMap = await _runShizukuCmd('sh -c "[ -e "$checkPath" ] && echo exists || echo missing"');
       final out = (outMap['stdout'] ?? '').toString();
       return out.toLowerCase().contains('exists');
     } catch (e) {
@@ -276,10 +285,23 @@ class LauncherController extends ChangeNotifier {
       }
 
       // Cleanup backup folder
-      final backupDir = Directory(backupDirPath);
-      if (await backupDir.exists()) {
-        await backupDir.delete(recursive: true);
-        addLog('Папка бэкапа удалена');
+      if (Platform.isAndroid) {
+        try {
+          final outMap = await _runShizukuCmd('sh -c "[ -d \"${backupDirPath}\" ] && echo exists || echo missing"');
+          final out = (outMap['stdout'] ?? '').toString();
+          if (out.toLowerCase().contains('exists')) {
+            await _runShizukuCmd('rm -rf "${backupDirPath}"');
+            addLog('Папка бэкапа удалена (Shizuku)');
+          }
+        } catch (e) {
+          addLog('Не удалось удалить папку бэкапа через Shizuku: ${e.toString()}');
+        }
+      } else {
+        final backupDir = Directory(backupDirPath);
+        if (await backupDir.exists()) {
+          await backupDir.delete(recursive: true);
+          addLog('Папка бэкапа удалена');
+        }
       }
 
       // Reset installed version state
@@ -500,9 +522,50 @@ class LauncherController extends ChangeNotifier {
 
   Future<void> _extractArchive(String zipPath, String targetDir) async {
     if (Platform.isAndroid) {
-      // Use shizuku/unzip on Android to avoid permission issues
-      await _runShizukuCmd('mkdir -p "${targetDir}"');
-      await _runShizukuUnzip(zipPath, targetDir);
+      // Two-step extraction to avoid relying on device 'unzip':
+      // 1) extract archive in Dart to a temp directory
+      // 2) use Shizuku to copy contents into the protected target
+      // 3) remove temp directory
+      final tempDir = await getTemporaryDirectory();
+      final extractDir = path.join(tempDir.path, 'reverse1999_extract_${DateTime.now().millisecondsSinceEpoch}');
+      final extractDirObj = Directory(extractDir);
+      try {
+        if (!await extractDirObj.exists()) await extractDirObj.create(recursive: true);
+
+        final archiveFile = File(zipPath);
+        final bytes = await archiveFile.readAsBytes();
+        final archive = ZipDecoder().decodeBytes(bytes);
+
+        for (final file in archive) {
+          final outPath = path.join(extractDir, file.name);
+          if (file.isFile) {
+            final data = file.content as List<int>;
+            final outFile = File(outPath);
+            await outFile.parent.create(recursive: true);
+            await outFile.writeAsBytes(data);
+          } else {
+            await Directory(outPath).create(recursive: true);
+          }
+        }
+
+        // Ensure target exists and copy extracted contents into it using Shizuku
+        await _runShizukuCmd('mkdir -p "$targetDir"');
+        // Copy the inner contents (use dot after extractDir to avoid nesting)
+        await _runShizukuCmd('cp -rf "${extractDir}/." "$targetDir"');
+      } catch (e) {
+        addLog('Ошибка распаковки/копирования архива: ${e.toString()}');
+        rethrow;
+      } finally {
+        try {
+          if (await extractDirObj.exists()) {
+            await extractDirObj.delete(recursive: true);
+            addLog('Временная папка распаковки удалена: $extractDir');
+          }
+        } catch (e) {
+          addLog('Не удалось удалить временную папку: ${e.toString()}');
+        }
+      }
+
       return;
     }
 
@@ -528,7 +591,7 @@ class LauncherController extends ChangeNotifier {
   }
 
   Future<void> _runShizukuUnzip(String zipPath, String targetDir) async {
-    final command = 'mkdir -p "${targetDir}" && unzip -o "${zipPath}" -d "${targetDir}"';
+    final command = 'mkdir -p "$targetDir" && unzip -o "$zipPath" -d "$targetDir"';
     try {
       final result = await _runShizukuCmd(command);
       addLog('Shizuku shell result: ${result.isEmpty ? 'no output' : result}');
