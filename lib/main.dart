@@ -287,10 +287,10 @@ class LauncherController extends ChangeNotifier {
       // Cleanup backup folder
       if (Platform.isAndroid) {
         try {
-          final outMap = await _runShizukuCmd('sh -c "[ -d \"${backupDirPath}\" ] && echo exists || echo missing"');
+          final outMap = await _runShizukuCmd('sh -c "[ -d "$backupDirPath" ] && echo exists || echo missing"');
           final out = (outMap['stdout'] ?? '').toString();
           if (out.toLowerCase().contains('exists')) {
-            await _runShizukuCmd('rm -rf "${backupDirPath}"');
+            await _runShizukuCmd('rm -rf "$backupDirPath"');
             addLog('Папка бэкапа удалена (Shizuku)');
           }
         } catch (e) {
@@ -551,7 +551,7 @@ class LauncherController extends ChangeNotifier {
         // Ensure target exists and copy extracted contents into it using Shizuku
         await _runShizukuCmd('mkdir -p "$targetDir"');
         // Copy the inner contents (use dot after extractDir to avoid nesting)
-        await _runShizukuCmd('cp -rf "${extractDir}/." "$targetDir"');
+        await _runShizukuCmd('cp -rf "$extractDir/." "$targetDir"');
       } catch (e) {
         addLog('Ошибка распаковки/копирования архива: ${e.toString()}');
         rethrow;
@@ -587,16 +587,6 @@ class LauncherController extends ChangeNotifier {
       } else {
         await Directory('${dir.path}/${file.name}').create(recursive: true);
       }
-    }
-  }
-
-  Future<void> _runShizukuUnzip(String zipPath, String targetDir) async {
-    final command = 'mkdir -p "$targetDir" && unzip -o "$zipPath" -d "$targetDir"';
-    try {
-      final result = await _runShizukuCmd(command);
-      addLog('Shizuku shell result: ${result.isEmpty ? 'no output' : result}');
-    } catch (error) {
-      addLog('Шизуку недоступен или произошла ошибка: ${error.toString()}');
     }
   }
 
@@ -1108,7 +1098,7 @@ class _MainScreenState extends State<MainScreen> {
                             }
                           }
                         },
-                        child: const Text('Удалить', style: TextStyle(color: Colors.grey)),
+                        child: const Text('Удалить', style: TextStyle(color: Color.fromRGBO(222, 88, 88, 1)RGB(255, 255, 61, 61))),
                       ),
                       const SizedBox(width: 12),
                       ElevatedButton(

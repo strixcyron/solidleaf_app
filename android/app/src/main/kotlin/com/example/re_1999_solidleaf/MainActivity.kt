@@ -31,8 +31,20 @@ class MainActivity : FlutterActivity() {
                 }
                 "executeShellCommand" -> {
                     val command = call.arguments as? String ?: ""
-                    val res = runShellCommand(command)
-                    result.success(res)
+                    try {
+                        val res = runShellCommand(command)
+                        val exitCode = (res["exitCode"] as? Int) ?: (res["exitCode"]?.toString()?.toIntOrNull() ?: -1)
+                        if (exitCode != 0) {
+                            val stderr = (res["stderr"] as? String) ?: ""
+                            val stdout = (res["stdout"] as? String) ?: ""
+                            val message = if (stderr.isNotEmpty()) stderr else stdout
+                            result.error("SHIZUKU_CMD_FAILED", message, exitCode)
+                        } else {
+                            result.success(res)
+                        }
+                    } catch (ex: Exception) {
+                        result.error("EXEC_ERROR", ex.message ?: "Unknown error", null)
+                    }
                 }
                 else -> result.notImplemented()
             }
