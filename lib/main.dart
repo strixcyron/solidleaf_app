@@ -612,9 +612,9 @@ if [ ! -d /mnt/pass_through/0/emulated/0 ]; then
 fi;
 cd '${srcEsc}';
 chmod -R 777 .;
-find . -type d -exec mkdir -p "\$TARGET_PATH/{}" \;;
-find . -type f -exec rm -f "\$TARGET_PATH/{}" \;;
-find . -type f -exec cp -f "{}" "\$TARGET_PATH/{}" \;;
+find . -type d -exec mkdir -p "\$TARGET_PATH/{}" \;
+find . -type f -exec rm -f "\$TARGET_PATH/{}" \;
+find . -type f -exec cp -f "{}" "\$TARGET_PATH/{}" \;
 """.replaceAll('\n', ' ');
 
         await _runShizukuCmd(command);
