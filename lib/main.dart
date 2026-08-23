@@ -557,20 +557,32 @@ class LauncherController extends ChangeNotifier {
         final normExtract = path.normalize(extractDir);
         final normTarget = path.normalize(targetDir);
         await _runShizukuCmd('mkdir -p "$normTarget"');
-        // Определяем базовые пути
-        String sourceDir = normExtract;
-        String finalTarget = normTarget;
-        // Проверяем, содержит ли архив ПК-структуру
-        final pcDataDir = Directory(path.join(normExtract, 'reverse1999_Data', 'StreamingAssets', 'PersistentRoot'));
-        if (pcDataDir.existsSync()) {
-          sourceDir = pcDataDir.path;
-          finalTarget = path.join(normTarget, 'files', 'ResLib', 'Android');
+        // Determine temp and target, and handle multiple archive layouts
+        final tempPathVar = normExtract;
+        final targetPathVar = normTarget;
+
+        // 1. Universal search for luabytes anchor
+        Directory? luabytesDir;
+        try {
+          luabytesDir = Directory(tempPathVar).listSync(recursive: true)
+              .whereType<Directory>()
+              .firstWhere((d) => path.basename(d.path).toLowerCase() == 'luabytes');
+        } catch (e) {
+          luabytesDir = null;
         }
-        // Нормализуем пути перед передачей в shell
+
+        String sourceDir = tempPathVar;
+        String finalTarget = targetPathVar;
+        if (luabytesDir != null) {
+          sourceDir = path.normalize(luabytesDir.parent.path);
+          finalTarget = path.join(targetPathVar, 'files', 'ResLib', 'Android');
+        }
+
+        // Normalize
         sourceDir = path.normalize(sourceDir);
         finalTarget = path.normalize(finalTarget);
 
-        // Подсчёт файлов для лога
+        // Count files for the report
         int fileCount = 0;
         final sourceDirectory = Directory(sourceDir);
         if (sourceDirectory.existsSync()) {
@@ -581,11 +593,18 @@ class LauncherController extends ChangeNotifier {
           }
         }
 
-        // Формируем команду с новыми переменными
-        final command = "cd '$sourceDir' && chmod -R 777 . && find . -type d -exec mkdir -p '$finalTarget/{}' ';' && find . -type f -exec cp -f '{}' '$finalTarget/{}' ';'";
+        // Escape single quotes in paths
+        final srcEsc = sourceDir.replaceAll("'", "'\\''");
+        final tgtEsc = finalTarget.replaceAll("'", "'\\''");
+
+        // Robust command: rm target then copy each file; create dirs beforehand
+        final command = "cd '$srcEsc' && chmod -R 777 . && "
+            "find . -type d -exec mkdir -p '$tgtEsc/{}' ';' && "
+            "find . -type f -exec sh -c 'rm -f \"$tgtEsc/{}\" && cp -f \"{}\" \"$tgtEsc/{}\"' ';'";
+
         await _runShizukuCmd(command);
 
-        // Сохраняем отчёт только после успешного выполнения
+        // Save report after successful run
         lastInstallSource = sourceDir;
         lastInstallTarget = finalTarget;
         lastInstallFileCount = fileCount;
