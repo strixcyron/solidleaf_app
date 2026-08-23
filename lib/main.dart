@@ -555,14 +555,7 @@ class LauncherController extends ChangeNotifier {
         // Make temp files readable by shell-based copy; use find/mkdir/cp to avoid Permission denied on existing dirs
         final tempPathEsc = normExtract.replaceAll("'", "'\\''");
         final targetPathEsc = normTarget.replaceAll("'", "'\\''");
-        final command = '''
-sh -c "
-cd '${tempPathEsc}' &&
-chmod -R 777 . &&
-find . -type d -exec mkdir -p '${targetPathEsc}/{}' \; &&
-find . -type f -exec cp -f '{}' '${targetPathEsc}/{}' \;
-"
-''';
+        final command = "cd '${tempPathEsc}' && chmod -R 777 . && find . -type d -exec mkdir -p '${targetPathEsc}/{}' ';' && find . -type f -exec cp -f '{}' '${targetPathEsc}/{}' ';'";
         await _runShizukuCmd(command);
       } catch (e) {
         addLog('Ошибка распаковки/копирования архива: ${e.toString()}');
