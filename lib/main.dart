@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:archive/archive.dart';
 import 'package:dio/dio.dart';
@@ -556,7 +557,7 @@ class LauncherController extends ChangeNotifier {
         // Ensure target exists and copy extracted contents into it using Shizuku
         final normExtract = path.normalize(extractDir);
         final normTarget = path.normalize(targetDir);
-        await _runShizukuCmd('mkdir -p "$normTarget"');
+        await _runShizukuCmd('mkdir -p "$normTarget" 2>/dev/null || true');
         // Determine temp and target, and handle multiple archive layouts
         final tempPathVar = normExtract;
         final targetPathVar = normTarget;
@@ -593,32 +594,44 @@ class LauncherController extends ChangeNotifier {
           }
         }
 
-        // Escape single quotes in paths
-        final srcEsc = sourceDir.replaceAll("'", "'\\''");
-        final tgtEsc = finalTarget.replaceAll("'", "'\\''");
+        // Ensure base target exists
+        await _runShizukuCmd('mkdir -p "${finalTarget.replaceAll("'", "'\\''")}" 2>/dev/null || true');
 
-        // Try pass_through mount to bypass FUSE; fall back to /data/media/0 if not available
-        final srcShizuku = srcEsc.replaceFirst('/storage/emulated/0/', '/mnt/pass_through/0/emulated/0/');
-        final tgtShizuku = tgtEsc.replaceFirst('/storage/emulated/0/', '/mnt/pass_through/0/emulated/0/');
-        final fallbackSrc = srcEsc.replaceAll('/storage/emulated/0/', '/data/media/0/');
-        final fallbackTgt = tgtEsc.replaceAll('/storage/emulated/0/', '/data/media/0/');
+        // Copy files individually. Use Shizuku to create directories and to write each file via base64 -> base64 -d
+        int copied = 0;
+        final srcDirObj = Directory(sourceDir);
+        if (srcDirObj.existsSync()) {
+          final files = srcDirObj.listSync(recursive: true).whereType<File>();
+          for (final f in files) {
+            final rel = path.relative(f.path, from: sourceDir);
+            final dst = path.join(finalTarget, rel);
+            final dstDir = path.dirname(dst);
 
-        final command = """
-TARGET_PATH='${tgtShizuku}';
-SOURCE_PATH='${srcShizuku}';
-if [ ! -d /mnt/pass_through/0/emulated/0 ]; then
-  TARGET_PATH='${fallbackTgt}';
-  SOURCE_PATH='${fallbackSrc}';
-fi;
-cd '${srcEsc}';
-chmod -R 777 .;
-find . -type d -exec mkdir -p "\$TARGET_PATH/{}" \;
-find . -type f -exec rm -f "\$TARGET_PATH/{}" \;
-find . -type f -exec cp -f "{}" "\$TARGET_PATH/{}" \;
-""".replaceAll('\n', ' ');
+            final dstDirEsc = dstDir.replaceAll("'", "'\\''");
+            final dstEsc = dst.replaceAll("'", "'\\''");
 
-        await _runShizukuCmd(command);
+            try {
+              // ensure directory exists using Shizuku
+              await _runShizukuCmd('mkdir -p "$dstDirEsc" 2>/dev/null || true');
 
+              // read bytes and push via base64 through Shizuku
+              final bytes = await File(f.path).readAsBytes();
+              final b64 = base64.encode(bytes);
+
+              final cmd = "printf '%s' '$b64' | base64 -d > '$dstEsc' && chmod 644 '$dstEsc'";
+              await _runShizukuCmd(cmd);
+              copied++;
+            } catch (e) {
+              addLog('Не удалось скопировать ${f.path} -> $dst: ${e.toString()}');
+              // continue processing other files
+            }
+          }
+        }
+
+        // Save report
+        lastInstallSource = sourceDir;
+        lastInstallTarget = finalTarget;
+        lastInstallFileCount = copied;
         // Save report after successful run
         lastInstallSource = sourceDir;
         lastInstallTarget = finalTarget;
