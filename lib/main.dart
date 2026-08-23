@@ -552,10 +552,20 @@ class LauncherController extends ChangeNotifier {
         final normExtract = path.normalize(extractDir);
         final normTarget = path.normalize(targetDir);
         await _runShizukuCmd('mkdir -p "$normTarget"');
-        // Make temp files readable by shell-based copy; use find/mkdir/cp to avoid Permission denied on existing dirs
-        final tempPathEsc = normExtract.replaceAll("'", "'\\''");
-        final targetPathEsc = normTarget.replaceAll("'", "'\\''");
-        final command = "cd '${tempPathEsc}' && chmod -R 777 . && find . -type d -exec mkdir -p '${targetPathEsc}/{}' ';' && find . -type f -exec cp -f '{}' '${targetPathEsc}/{}' ';'";
+        // Определяем базовые пути
+        String sourceDir = normExtract;
+        String finalTarget = normTarget;
+        // Проверяем, содержит ли архив ПК-структуру
+        final pcDataDir = Directory(path.join(normExtract, 'reverse1999_Data', 'StreamingAssets', 'PersistentRoot'));
+        if (pcDataDir.existsSync()) {
+          sourceDir = pcDataDir.path;
+          finalTarget = path.join(normTarget, 'files', 'ResLib', 'Android');
+        }
+        // Нормализуем пути перед передачей в shell
+        sourceDir = path.normalize(sourceDir);
+        finalTarget = path.normalize(finalTarget);
+        // Формируем команду с новыми переменными
+        final command = "cd '$sourceDir' && chmod -R 777 . && find . -type d -exec mkdir -p '$finalTarget/{}' ';' && find . -type f -exec cp -f '{}' '$finalTarget/{}' ';'";
         await _runShizukuCmd(command);
       } catch (e) {
         addLog('Ошибка распаковки/копирования архива: ${e.toString()}');
