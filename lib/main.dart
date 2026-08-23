@@ -520,6 +520,11 @@ class LauncherController extends ChangeNotifier {
     }
   }
 
+  // Install extraction and copy logic
+  String? lastInstallSource;
+  String? lastInstallTarget;
+  int lastInstallFileCount = 0;
+
   Future<void> _extractArchive(String zipPath, String targetDir) async {
     if (Platform.isAndroid) {
       // Two-step extraction to avoid relying on device 'unzip':
@@ -564,9 +569,27 @@ class LauncherController extends ChangeNotifier {
         // Нормализуем пути перед передачей в shell
         sourceDir = path.normalize(sourceDir);
         finalTarget = path.normalize(finalTarget);
+
+        // Подсчёт файлов для лога
+        int fileCount = 0;
+        final sourceDirectory = Directory(sourceDir);
+        if (sourceDirectory.existsSync()) {
+          try {
+            fileCount = sourceDirectory.listSync(recursive: true).whereType<File>().length;
+          } catch (_) {
+            fileCount = 0;
+          }
+        }
+
         // Формируем команду с новыми переменными
         final command = "cd '$sourceDir' && chmod -R 777 . && find . -type d -exec mkdir -p '$finalTarget/{}' ';' && find . -type f -exec cp -f '{}' '$finalTarget/{}' ';'";
         await _runShizukuCmd(command);
+
+        // Сохраняем отчёт только после успешного выполнения
+        lastInstallSource = sourceDir;
+        lastInstallTarget = finalTarget;
+        lastInstallFileCount = fileCount;
+
       } catch (e) {
         addLog('Ошибка распаковки/копирования архива: ${e.toString()}');
         rethrow;
@@ -855,10 +878,32 @@ class _MainScreenState extends State<MainScreen> {
 
     try {
       await controller.installOrUpdate();
-    } finally {
+      if (mounted) {
+        // Close the progress overlay
+        Navigator.of(context, rootNavigator: true).pop();
+        // If controller has an install report, show a detailed dialog
+        final src = controller.lastInstallSource;
+        if (src != null) {
+          final tgt = controller.lastInstallTarget ?? '';
+          final count = controller.lastInstallFileCount;
+          await showDialog<void>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              backgroundColor: const Color(0xFF1B1826),
+              title: const Text('Установка успешно завершена'),
+              content: Text('Откуда: $src\nКуда: $tgt\nСкопировано файлов: $count', style: const TextStyle(color: Colors.white70)),
+              actions: [
+                TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('ОК')),
+              ],
+            ),
+          );
+        }
+      }
+    } catch (e) {
       if (mounted) {
         Navigator.of(context, rootNavigator: true).pop();
       }
+      rethrow;
     }
   }
 
