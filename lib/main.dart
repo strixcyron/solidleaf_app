@@ -1155,6 +1155,38 @@ class _MainScreenState extends State<MainScreen> {
               ),
               const SizedBox(width: 12),
               Expanded(
+                child: OutlinedButton(
+                  onPressed: () async {
+                    final confirmed = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        backgroundColor: const Color(0xFF1B1826),
+                        title: const Text('Восстановление оригинальных файлов'),
+                        content: const Text('Вы уверены, что хотите восстановить оригинальные файлы из бэкапа? Это удалит русификатор.'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Отмена')),
+                          ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Восстановить')),
+                        ],
+                      ),
+                    );
+
+                    if (!mounted) return;
+                    if (confirmed == true) {
+                      try {
+                        await controller.restoreBackup();
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Восстановление завершено')));
+                      } catch (e) {
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка восстановления: ${e.toString()}')));
+                      }
+                    }
+                  },
+                  child: const Text('Удалить', style: TextStyle(color: Colors.grey)),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF7B52F4),
