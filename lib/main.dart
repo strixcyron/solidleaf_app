@@ -551,10 +551,19 @@ class LauncherController extends ChangeNotifier {
         // Ensure target exists and copy extracted contents into it using Shizuku
         final normExtract = path.normalize(extractDir);
         final normTarget = path.normalize(targetDir);
-        await _runShizukuCmd('mkdir -p "${normTarget}"');
-        // Make temp files readable by shell-based cp and copy inner contents using wildcard
-        final copyCommand = 'sh -c "chmod -R 777 \"${normExtract}\" && cp -rf ${normExtract}/* \"${normTarget}\""';
-        await _runShizukuCmd(copyCommand);
+        await _runShizukuCmd('mkdir -p "$normTarget"');
+        // Make temp files readable by shell-based copy; use find/mkdir/cp to avoid Permission denied on existing dirs
+        final tempPathEsc = normExtract.replaceAll("'", "'\\''");
+        final targetPathEsc = normTarget.replaceAll("'", "'\\''");
+        final command = '''
+sh -c "
+cd '${tempPathEsc}' &&
+chmod -R 777 . &&
+find . -type d -exec mkdir -p '${targetPathEsc}/{}' \; &&
+find . -type f -exec cp -f '{}' '${targetPathEsc}/{}' \;
+"
+''';
+        await _runShizukuCmd(command);
       } catch (e) {
         addLog('Ошибка распаковки/копирования архива: ${e.toString()}');
         rethrow;
