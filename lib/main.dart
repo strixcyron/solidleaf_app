@@ -1098,7 +1098,7 @@ class _MainScreenState extends State<MainScreen> {
                             }
                           }
                         },
-                        child: const Text('Удалить', style: TextStyle(color: Color.fromRGBO(222, 88, 88, 1)RGB(255, 255, 61, 61))),
+                        child: const Text('Удалить', style: TextStyle(color: Colors.grey)),
                       ),
                       const SizedBox(width: 12),
                       ElevatedButton(
