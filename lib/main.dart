@@ -426,7 +426,7 @@ class LauncherController extends ChangeNotifier {
         );
       }
 
-      final tempDir = await getTemporaryDirectory();
+      final tempDir = await getExternalStorageDirectory() ?? await getTemporaryDirectory();
       final zipPath = '${tempDir.path}/reverse1999_${DateTime.now().millisecondsSinceEpoch}.zip';
       await _dio.download(
         zipUrl,
@@ -531,7 +531,7 @@ class LauncherController extends ChangeNotifier {
       // 1) extract archive in Dart to a temp directory
       // 2) use Shizuku to copy contents into the protected target
       // 3) remove temp directory
-      final tempDir = await getTemporaryDirectory();
+      final tempDir = await getExternalStorageDirectory() ?? await getTemporaryDirectory();
       final extractDir = path.join(tempDir.path, 'reverse1999_extract_${DateTime.now().millisecondsSinceEpoch}');
       final extractDirObj = Directory(extractDir);
       try {
@@ -597,10 +597,25 @@ class LauncherController extends ChangeNotifier {
         final srcEsc = sourceDir.replaceAll("'", "'\\''");
         final tgtEsc = finalTarget.replaceAll("'", "'\\''");
 
-        // Robust command: rm target then copy each file; create dirs beforehand
-        final command = "cd '$srcEsc' && chmod -R 777 . && "
-            "find . -type d -exec mkdir -p '$tgtEsc/{}' ';' && "
-            "find . -type f -exec sh -c 'rm -f \"$tgtEsc/{}\" && cp -f \"{}\" \"$tgtEsc/{}\"' ';'";
+        // Try pass_through mount to bypass FUSE; fall back to /data/media/0 if not available
+        final srcShizuku = srcEsc.replaceFirst('/storage/emulated/0/', '/mnt/pass_through/0/emulated/0/');
+        final tgtShizuku = tgtEsc.replaceFirst('/storage/emulated/0/', '/mnt/pass_through/0/emulated/0/');
+        final fallbackSrc = srcEsc.replaceAll('/storage/emulated/0/', '/data/media/0/');
+        final fallbackTgt = tgtEsc.replaceAll('/storage/emulated/0/', '/data/media/0/');
+
+        final command = """
+TARGET_PATH='${tgtShizuku}'
+SOURCE_PATH='${srcShizuku}'
+if [ ! -d /mnt/pass_through/0/emulated/0 ]; then
+  TARGET_PATH='${fallbackTgt}'
+  SOURCE_PATH='${fallbackSrc}'
+fi
+cd '${srcEsc}'
+chmod -R 777 .
+find . -type d -exec mkdir -p "\$TARGET_PATH/{}" \;
+find . -type f -exec rm -f "\$TARGET_PATH/{}" \;
+find . -type f -exec cp -f "{}" "\$TARGET_PATH/{}" \;
+""".replaceAll('\n', ' ');
 
         await _runShizukuCmd(command);
 
