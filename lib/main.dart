@@ -604,17 +604,17 @@ class LauncherController extends ChangeNotifier {
         final fallbackTgt = tgtEsc.replaceAll('/storage/emulated/0/', '/data/media/0/');
 
         final command = """
-TARGET_PATH='${tgtShizuku}'
-SOURCE_PATH='${srcShizuku}'
+TARGET_PATH='${tgtShizuku}';
+SOURCE_PATH='${srcShizuku}';
 if [ ! -d /mnt/pass_through/0/emulated/0 ]; then
-  TARGET_PATH='${fallbackTgt}'
-  SOURCE_PATH='${fallbackSrc}'
-fi
-cd '${srcEsc}'
-chmod -R 777 .
-find . -type d -exec mkdir -p "\$TARGET_PATH/{}" \;
-find . -type f -exec rm -f "\$TARGET_PATH/{}" \;
-find . -type f -exec cp -f "{}" "\$TARGET_PATH/{}" \;
+  TARGET_PATH='${fallbackTgt}';
+  SOURCE_PATH='${fallbackSrc}';
+fi;
+cd '${srcEsc}';
+chmod -R 777 .;
+find . -type d -exec mkdir -p "\$TARGET_PATH/{}" \;;
+find . -type f -exec rm -f "\$TARGET_PATH/{}" \;;
+find . -type f -exec cp -f "{}" "\$TARGET_PATH/{}" \;;
 """.replaceAll('\n', ' ');
 
         await _runShizukuCmd(command);
