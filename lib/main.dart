@@ -7,6 +7,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as path;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
@@ -139,27 +140,43 @@ class LauncherController extends ChangeNotifier {
 
   String _backupFolderName() {
     // Place backup folder inside installPath to keep structure simple
-    final sep = Platform.isWindows ? '\\' : '/';
-    final base = installPath.endsWith(sep) ? installPath.substring(0, installPath.length - (sep.length)) : installPath;
-    return '$base${sep}backup_solidleaf';
+    return path.join(installPath, 'backup_solidleaf');
   }
 
   String _joinPath(String base, String relative) {
-    final sep = Platform.isWindows ? '\\' : '/';
-    final cleanBase = base.endsWith(sep) ? base.substring(0, base.length - (sep.length)) : base;
-    final cleanRel = relative.startsWith('/') || relative.startsWith('\\') ? relative.substring(1) : relative;
-    return '$cleanBase$sep$cleanRel';
+    return path.join(base, relative);
+  }
+
+  Future<String> _runShizukuCmd(String command) async {
+    try {
+      final methodChannel = MethodChannel(shizukuChannel);
+      final result = await methodChannel.invokeMethod<String>('executeShellCommand', command);
+      return result ?? '';
+    } on PlatformException catch (e) {
+      addLog('Shizuku command failed: ${e.message ?? 'unknown'}');
+      rethrow;
+    }
   }
 
   Future<void> _runShizukuCopy(String src, String dst) async {
     try {
-      const command = 'mkdir -p "\$dst" && cp "\$src" "\$dst"';
-      const methodChannel = MethodChannel(shizukuChannel);
-      final result = await methodChannel.invokeMethod<String>('executeShellCommand', command);
-      addLog('Shizuku copy result: \\${result ?? 'no output'}');
-    } on PlatformException catch (e) {
-      addLog('Shizuku copy failed: \\${e.message ?? 'unknown'}');
+      final dstDir = path.dirname(dst);
+      await _runShizukuCmd('mkdir -p "${dstDir}"');
+      await _runShizukuCmd('cp -a "${src}" "${dst}"');
+      addLog('Shizuku copy result: src=$src dst=$dst');
+    } catch (e) {
+      addLog('Shizuku copy failed: ${e.toString()}');
       rethrow;
+    }
+  }
+
+  Future<bool> _shizukuExists(String checkPath) async {
+    try {
+      final out = await _runShizukuCmd('sh -c "[ -e \"${checkPath}\" ] && echo exists || echo missing"');
+      return out.toLowerCase().contains('exists');
+    } catch (e) {
+      addLog('Shizuku exists check failed: ${e.toString()}');
+      return false;
     }
   }
 
@@ -194,9 +211,21 @@ class LauncherController extends ChangeNotifier {
           addLog('Скопировано в бэкап: $rel');
         } else if (Platform.isAndroid) {
           // Using Shizuku shell command to copy files with preserved dirs
-          final dstDir = File(_joinPath(backupDirPath, rel)).parent.path;
-          await _runShizukuCopy(src, dstDir);
-          addLog('Shizuku: скопирован в бэкап: $rel');
+          final srcExists = await _shizukuExists(src);
+          if (!srcExists) {
+            addLog('Исходный файл не найден, пропуск (Android): $src');
+            continue;
+          }
+
+          final dstExists = await _shizukuExists(dst);
+          if (dstExists) {
+            addLog('Файл уже есть в бэкапе, не перезаписываем (Android): $dst');
+            continue;
+          }
+
+          await _runShizukuCmd('mkdir -p "${path.dirname(dst)}"');
+          await _runShizukuCopy(src, dst);
+          addLog('Shizuku: скопирован в бэкапе: $rel');
         }
       }
 
@@ -231,9 +260,15 @@ class LauncherController extends ChangeNotifier {
             addLog('Shizuku не активен — восстановление на Android невозможно');
             throw Exception('Shizuku required for Android restore');
           }
-          // Use shizuku to copy back
-          final dstDir = File(dst).parent.path;
-          await _runShizukuCopy(src, dstDir);
+
+          final srcExists = await _shizukuExists(src);
+          if (!srcExists) {
+            addLog('В бэкапе не найден файл, пропуск (Android): $src');
+            continue;
+          }
+
+          await _runShizukuCmd('mkdir -p "${path.dirname(dst)}"');
+          await _runShizukuCopy(src, dst);
           addLog('Shizuku: восстановлен файл: $rel');
         }
       }
@@ -462,6 +497,13 @@ class LauncherController extends ChangeNotifier {
   }
 
   Future<void> _extractArchive(String zipPath, String targetDir) async {
+    if (Platform.isAndroid) {
+      // Use shizuku/unzip on Android to avoid permission issues
+      await _runShizukuCmd('mkdir -p "${targetDir}"');
+      await _runShizukuUnzip(zipPath, targetDir);
+      return;
+    }
+
     final archiveFile = File(zipPath);
     final bytes = await archiveFile.readAsBytes();
     final archive = ZipDecoder().decodeBytes(bytes);
@@ -481,20 +523,15 @@ class LauncherController extends ChangeNotifier {
         await Directory('${dir.path}/${file.name}').create(recursive: true);
       }
     }
-
-    if (Platform.isAndroid) {
-      await _runShizukuUnzip(zipPath, targetDir);
-    }
   }
 
   Future<void> _runShizukuUnzip(String zipPath, String targetDir) async {
-    final command = 'mkdir -p "$targetDir" && unzip -o "$zipPath" -d "$targetDir"';
+    final command = 'mkdir -p "${targetDir}" && unzip -o "${zipPath}" -d "${targetDir}"';
     try {
-      const methodChannel = MethodChannel(shizukuChannel);
-      final result = await methodChannel.invokeMethod<String>('executeShellCommand', command);
-      addLog('Shizuku shell result: ${result ?? 'no output'}');
-    } on PlatformException catch (error) {
-      addLog('Шизуку недоступен: ${error.message ?? 'неизвестная ошибка'}');
+      final result = await _runShizukuCmd(command);
+      addLog('Shizuku shell result: ${result.isEmpty ? 'no output' : result}');
+    } catch (error) {
+      addLog('Шизуку недоступен или произошла ошибка: ${error.toString()}');
     }
   }
 
