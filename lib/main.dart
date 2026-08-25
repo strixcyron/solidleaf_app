@@ -147,52 +147,118 @@ class LauncherController extends ChangeNotifier {
     return path.join(base, relative);
   }
 
-  Future<Map<String, dynamic>> _runShizukuCmd(String command, {Uint8List? stdinBytes}) async {
+  // --- Shizuku UserService file transfer primitives -------------------------
+  // These call into FileTransferUserService (a persistent process bound via
+  // Shizuku.bindUserService running with shell/root identity) which performs
+  // plain java.io File operations directly. This is required to reliably
+  // write into another app's protected Android/data/<pkg> folder — spawning
+  // "sh -c" subprocesses (even under the shell uid) was found to be blocked
+  // on some devices/ROMs even after explicit rm -f before overwrite.
+  static const int _fsChunkSize = 512 * 1024;
+
+  Future<void> _ensureFileService() async {
+    const methodChannel = MethodChannel(shizukuChannel);
     try {
-      const methodChannel = MethodChannel(shizukuChannel);
-      final dynamic argument = stdinBytes != null ? {'command': command, 'stdin': stdinBytes} : command;
-      final result = await methodChannel.invokeMethod<Map>('executeShellCommand', argument);
-      if (result == null) throw Exception('Shizuku command returned no result');
-      final map = Map<String, dynamic>.from(result.cast<String, dynamic>());
-      final exitCodeRaw = map['exitCode'];
-      final exitCode = exitCodeRaw is int ? exitCodeRaw : int.tryParse(exitCodeRaw?.toString() ?? '') ?? -1;
-      if (exitCode != 0) {
-        final stderr = (map['stderr'] ?? '').toString();
-        final stdout = (map['stdout'] ?? '').toString();
-        addLog('Shizuku command failed (exitCode=$exitCode): $stderr');
-        throw Exception('Shizuku command failed: ${stderr.isNotEmpty ? stderr : stdout}');
+      final ok = await methodChannel.invokeMethod<bool>('ensureFileService') ?? false;
+      if (!ok) {
+        throw Exception('Не удалось подключить Shizuku file service');
       }
-      return map;
     } on PlatformException catch (e) {
-      addLog('Shizuku command failed: ${e.message ?? 'unknown'}');
-      rethrow;
+      throw Exception('Shizuku file service недоступен: ${e.message ?? e.code}');
     }
   }
 
-  Future<void> _runShizukuCopy(String src, String dst) async {
-    try {
-      final dstDir = path.dirname(dst);
-      await _runShizukuCmd('mkdir -p "$dstDir"');
-      // Remove any pre-existing target first: overwriting it in place is checked
-      // against ITS OWN (possibly restrictive) permissions, while creating a
-      // brand-new file only needs write access to the parent directory.
-      await _runShizukuCmd('rm -f "$dst" 2>/dev/null || true');
-      final res = await _runShizukuCmd('cp -f "$src" "$dst"');
-      addLog('Shizuku copy result: src=$src dst=$dst exit=${res['exitCode']} stderr=${res['stderr']}');
-    } catch (e) {
-      addLog('Shizuku copy failed: ${e.toString()}');
-      rethrow;
+  Future<bool> _fsMkdirs(String targetPath) async {
+    const methodChannel = MethodChannel(shizukuChannel);
+    return await methodChannel.invokeMethod<bool>('fsMkdirs', targetPath) ?? false;
+  }
+
+  Future<bool> _fsWriteChunk(String targetPath, Uint8List data, bool append) async {
+    const methodChannel = MethodChannel(shizukuChannel);
+    return await methodChannel.invokeMethod<bool>('fsWriteChunk', {
+          'path': targetPath,
+          'data': data,
+          'append': append,
+        }) ??
+        false;
+  }
+
+  Future<Uint8List?> _fsReadChunk(String targetPath, int offset, int length) async {
+    const methodChannel = MethodChannel(shizukuChannel);
+    final result = await methodChannel.invokeMethod('fsReadChunk', {
+      'path': targetPath,
+      'offset': offset,
+      'length': length,
+    });
+    if (result == null) return null;
+    return Uint8List.fromList(List<int>.from(result as List));
+  }
+
+  Future<int> _fsFileSize(String targetPath) async {
+    const methodChannel = MethodChannel(shizukuChannel);
+    final result = await methodChannel.invokeMethod<int>('fsFileSize', targetPath);
+    return result ?? -1;
+  }
+
+  Future<bool> _fsDeleteRecursive(String targetPath) async {
+    const methodChannel = MethodChannel(shizukuChannel);
+    return await methodChannel.invokeMethod<bool>('fsDeleteRecursive', targetPath) ?? false;
+  }
+
+  Future<bool> _fsExists(String targetPath) async {
+    const methodChannel = MethodChannel(shizukuChannel);
+    return await methodChannel.invokeMethod<bool>('fsExists', targetPath) ?? false;
+  }
+
+  /// Copies a file that lives in a Shizuku-only-accessible location (both src
+  /// and dst are read/written through the privileged file service).
+  Future<void> _fsCopyFile(String src, String dst) async {
+    await _fsMkdirs(path.dirname(dst));
+    final size = await _fsFileSize(src);
+    if (size < 0) {
+      throw Exception('Источник не найден или недоступен: $src');
+    }
+    if (size == 0) {
+      final ok = await _fsWriteChunk(dst, Uint8List(0), false);
+      if (!ok) throw Exception('Не удалось создать пустой файл: $dst');
+      return;
+    }
+    var offset = 0;
+    var first = true;
+    while (offset < size) {
+      final len = (offset + _fsChunkSize < size) ? _fsChunkSize : (size - offset);
+      final chunk = await _fsReadChunk(src, offset, len);
+      if (chunk == null) {
+        throw Exception('Не удалось прочитать $src на смещении $offset');
+      }
+      final ok = await _fsWriteChunk(dst, chunk, !first);
+      if (!ok) {
+        throw Exception('Не удалось записать в $dst');
+      }
+      first = false;
+      offset += len;
     }
   }
 
-  Future<bool> _shizukuExists(String checkPath) async {
-    try {
-      final outMap = await _runShizukuCmd('sh -c "[ -e "$checkPath" ] && echo exists || echo missing"');
-      final out = (outMap['stdout'] ?? '').toString();
-      return out.toLowerCase().contains('exists');
-    } catch (e) {
-      addLog('Shizuku exists check failed: ${e.toString()}');
-      return false;
+  /// Writes a locally readable Dart [File] (e.g. our own extracted temp file)
+  /// into a Shizuku-only-writable destination, in chunks.
+  Future<void> _fsWriteLocalFile(File localFile, String dstPath) async {
+    await _fsMkdirs(path.dirname(dstPath));
+    final data = await localFile.readAsBytes();
+    if (data.isEmpty) {
+      final ok = await _fsWriteChunk(dstPath, Uint8List(0), false);
+      if (!ok) throw Exception('Не удалось создать пустой файл: $dstPath');
+      return;
+    }
+    var offset = 0;
+    var first = true;
+    while (offset < data.length) {
+      final end = (offset + _fsChunkSize < data.length) ? offset + _fsChunkSize : data.length;
+      final chunk = Uint8List.sublistView(data, offset, end);
+      final ok = await _fsWriteChunk(dstPath, chunk, !first);
+      if (!ok) throw Exception('Не удалось записать чанк в $dstPath (offset=$offset)');
+      first = false;
+      offset = end;
     }
   }
 
@@ -200,9 +266,12 @@ class LauncherController extends ChangeNotifier {
     addLog('Создание резервной копии файлов...');
     final backupDirPath = _backupFolderName();
     try {
-      if (Platform.isAndroid && !isShizukuActive) {
-        addLog('Shizuku не активен — создание бэкапа на Android невозможно');
-        throw Exception('Shizuku required for Android backup');
+      if (Platform.isAndroid) {
+        if (!isShizukuActive) {
+          addLog('Shizuku не активен — создание бэкапа на Android невозможно');
+          throw Exception('Shizuku required for Android backup');
+        }
+        await _ensureFileService();
       }
 
       final files = Platform.isWindows ? _backupFilesWindows : _backupFilesAndroid;
@@ -226,21 +295,19 @@ class LauncherController extends ChangeNotifier {
           await srcFile.copy(dst);
           addLog('Скопировано в бэкап: $rel');
         } else if (Platform.isAndroid) {
-          // Using Shizuku shell command to copy files with preserved dirs
-          final srcExists = await _shizukuExists(src);
+          final srcExists = await _fsExists(src);
           if (!srcExists) {
             addLog('Исходный файл не найден, пропуск (Android): $src');
             continue;
           }
 
-          final dstExists = await _shizukuExists(dst);
+          final dstExists = await _fsExists(dst);
           if (dstExists) {
             addLog('Файл уже есть в бэкапе, не перезаписываем (Android): $dst');
             continue;
           }
 
-          await _runShizukuCmd('mkdir -p "${path.dirname(dst)}"');
-          await _runShizukuCopy(src, dst);
+          await _fsCopyFile(src, dst);
           addLog('Shizuku: скопирован в бэкапе: $rel');
         }
       }
@@ -256,6 +323,14 @@ class LauncherController extends ChangeNotifier {
     addLog('Восстановление из бэкапа...');
     final backupDirPath = _backupFolderName();
     try {
+      if (Platform.isAndroid) {
+        if (!isShizukuActive) {
+          addLog('Shizuku не активен — восстановление на Android невозможно');
+          throw Exception('Shizuku required for Android restore');
+        }
+        await _ensureFileService();
+      }
+
       final files = Platform.isWindows ? _backupFilesWindows : _backupFilesAndroid;
 
       for (final rel in files) {
@@ -272,19 +347,13 @@ class LauncherController extends ChangeNotifier {
           await srcFile.copy(dst);
           addLog('Восстановлен файл: $rel');
         } else if (Platform.isAndroid) {
-          if (!isShizukuActive) {
-            addLog('Shizuku не активен — восстановление на Android невозможно');
-            throw Exception('Shizuku required for Android restore');
-          }
-
-          final srcExists = await _shizukuExists(src);
+          final srcExists = await _fsExists(src);
           if (!srcExists) {
             addLog('В бэкапе не найден файл, пропуск (Android): $src');
             continue;
           }
 
-          await _runShizukuCmd('mkdir -p "${path.dirname(dst)}"');
-          await _runShizukuCopy(src, dst);
+          await _fsCopyFile(src, dst);
           addLog('Shizuku: восстановлен файл: $rel');
         }
       }
@@ -292,11 +361,14 @@ class LauncherController extends ChangeNotifier {
       // Cleanup backup folder
       if (Platform.isAndroid) {
         try {
-          final outMap = await _runShizukuCmd('sh -c "[ -d "$backupDirPath" ] && echo exists || echo missing"');
-          final out = (outMap['stdout'] ?? '').toString();
-          if (out.toLowerCase().contains('exists')) {
-            await _runShizukuCmd('rm -rf "$backupDirPath"');
-            addLog('Папка бэкапа удалена (Shizuku)');
+          final exists = await _fsExists(backupDirPath);
+          if (exists) {
+            final ok = await _fsDeleteRecursive(backupDirPath);
+            if (ok) {
+              addLog('Папка бэкапа удалена (Shizuku)');
+            } else {
+              addLog('Не удалось удалить папку бэкапа через Shizuku');
+            }
           }
         } catch (e) {
           addLog('Не удалось удалить папку бэкапа через Shizuku: ${e.toString()}');
@@ -530,49 +602,20 @@ class LauncherController extends ChangeNotifier {
   String? lastInstallTarget;
   int lastInstallFileCount = 0;
 
-  /// Finds a temp directory that Dart can write to for extraction.
-  /// Prefers a location visible to Shizuku's shell (external/app-specific dirs);
-  /// falls back to the internal cache directory if nothing else is writable.
-  /// Returns the directory plus whether it's expected to be shell-readable.
-  Future<(Directory dir, bool shellReadable)> _resolveExtractionRoot() async {
-    final candidates = <Future<Directory?> Function()>[
-      () async => await getExternalStorageDirectory(),
-      () async => Directory('/storage/emulated/0/Android/data/com.example.re_1999_solidleaf/files'),
-    ];
-
-    for (final candidateFn in candidates) {
-      try {
-        final candidate = await candidateFn();
-        if (candidate == null) continue;
-        final root = Directory(path.join(candidate.path, 'SolidLeaf_Temp'));
-        if (!await root.exists()) {
-          await root.create(recursive: true);
-        }
-        // Verify writability with a probe file
-        final probe = File(path.join(root.path, '.probe'));
-        await probe.writeAsBytes(const [1]);
-        await probe.delete();
-        return (root, true);
-      } catch (e) {
-        addLog('Временная папка недоступна (${e.toString()}), пробуем другой вариант...');
-        continue;
-      }
-    }
-
-    // Last resort: internal cache — always writable by the app but NOT readable by shell (SELinux).
-    final internal = await getTemporaryDirectory();
-    final internalRoot = Directory(path.join(internal.path, 'SolidLeaf_Temp'));
-    if (!await internalRoot.exists()) {
-      await internalRoot.create(recursive: true);
-    }
-    addLog('Внешние директории недоступны, используем внутренний кэш (файлы будут переданы через Shizuku поштучно)');
-    return (internalRoot, false);
-  }
-
   Future<void> _extractArchive(String zipPath, String targetDir) async {
     if (Platform.isAndroid) {
-      final (publicTempRoot, shellReadable) = await _resolveExtractionRoot();
-      final workDir = Directory(path.join(publicTempRoot.path, 'install_${DateTime.now().millisecondsSinceEpoch}'));
+      if (!isShizukuActive) {
+        addLog('Shizuku не активен — установка на Android невозможна');
+        throw Exception('Shizuku required for Android install');
+      }
+      await _ensureFileService();
+
+      // Extract into our own app-private cache — Dart can always read/write
+      // here directly, no privileged access needed for this step. Only the
+      // final write into the game's protected folder goes through the
+      // Shizuku file service.
+      final tempRoot = await getTemporaryDirectory();
+      final workDir = Directory(path.join(tempRoot.path, 'SolidLeaf_Temp', 'install_${DateTime.now().millisecondsSinceEpoch}'));
 
       try {
         if (await workDir.exists()) {
@@ -617,127 +660,43 @@ class LauncherController extends ChangeNotifier {
         sourceDir = path.normalize(sourceDir);
         finalTarget = path.normalize(finalTarget);
 
-        int fileCount = 0;
         final sourceDirectory = Directory(sourceDir);
-        if (sourceDirectory.existsSync()) {
+        final allFiles = sourceDirectory.existsSync()
+            ? sourceDirectory.listSync(recursive: true).whereType<File>().toList()
+            : <File>[];
+
+        await _fsMkdirs(finalTarget);
+
+        int copied = 0;
+        String? firstError;
+        for (final f in allFiles) {
+          final rel = path.relative(f.path, from: sourceDir);
+          final dst = path.join(finalTarget, rel);
           try {
-            fileCount = sourceDirectory.listSync(recursive: true).whereType<File>().length;
-          } catch (_) {
-            fileCount = 0;
-          }
-        }
-
-        // The target files (game assets) may already exist, created by the game
-        // itself with a restrictive mode. Opening an EXISTING file for O_TRUNC
-        // write is checked against that file's own owner/permissions, whereas
-        // creating a brand-new file only needs write access to the parent
-        // directory (which the privileged shell already has). So we must
-        // explicitly unlink each target file before (re)writing it.
-        if (shellReadable) {
-          // Fast path: Shizuku's shell can read our temp dir directly — copy in bulk,
-          // removing each existing target file first so overwriting isn't blocked
-          // by that file's own restrictive permissions.
-          final sourceEsc = sourceDir.replaceAll("'", "'\\''");
-          final targetEsc = finalTarget.replaceAll("'", "'\\''");
-
-          final command = [
-            "SOURCE='$sourceEsc';",
-            "TARGET='$targetEsc';",
-            r'if [ ! -d "$SOURCE" ]; then echo "SOURCE_NOT_FOUND" >&2; exit 1; fi;',
-            r'mkdir -p "$TARGET" 2>/dev/null || { echo "TARGET_MKDIR_FAILED" >&2; exit 1; };',
-            r'chmod -R 777 "$SOURCE" 2>/dev/null || true;',
-            r'cd "$SOURCE" || exit 1;',
-            r'find . -type d -exec mkdir -p "$TARGET/{}" \;;',
-            r'find . -type f -exec rm -f "$TARGET/{}" \;;',
-            r'find . -type f -exec cp -f "{}" "$TARGET/{}" \;;',
-            r'chmod -R 777 "$TARGET" 2>/dev/null || true;',
-            r'if [ ! -d "$TARGET/ResLib" ] && [ ! -d "$TARGET/files/ResLib" ] && [ ! -d "$TARGET/files/ResLib/Android" ]; then',
-            'echo "COPY_VALIDATION_FAILED" >&2;',
-            'exit 1;',
-            'fi;',
-            'echo "COPY_OK";',
-          ].join(' ');
-
-          final copyResult = await _runShizukuCmd(command);
-          final stdout = (copyResult['stdout'] ?? '').toString();
-          final stderr = (copyResult['stderr'] ?? '').toString();
-          final validationText = (stdout + stderr).trim();
-          if (validationText.contains('COPY_VALIDATION_FAILED') ||
-              validationText.contains('SOURCE_NOT_FOUND') ||
-              validationText.contains('TARGET_MKDIR_FAILED')) {
-            throw Exception('Shizuku копирование не подтвердилось: $validationText');
-          }
-        } else {
-          // Slow but universal path: shell cannot read our internal cache, so we
-          // stream each file's bytes to Shizuku via process stdin (avoids the
-          // Linux MAX_ARG_STRLEN limit that a giant command-line argument would hit).
-          try {
-            await _runShizukuCmd('echo shizuku_probe_ok');
+            await _fsWriteLocalFile(f, dst);
+            copied++;
           } catch (e) {
-            throw Exception('Shizuku недоступен для побайтовой записи файлов: ${e.toString()}');
-          }
-
-          await _runShizukuCmd('mkdir -p "${finalTarget.replaceAll("'", "'\\''")}" 2>/dev/null || true');
-
-          const chunkSize = 400 * 1024; // raw bytes per stdin chunk — safe under Binder transaction limits
-          int copied = 0;
-          String? firstError;
-          if (sourceDirectory.existsSync()) {
-            final files = sourceDirectory.listSync(recursive: true).whereType<File>();
-            for (final f in files) {
-              final rel = path.relative(f.path, from: sourceDir);
-              final dst = path.join(finalTarget, rel);
-              final dstDirEsc = path.dirname(dst).replaceAll("'", "'\\''");
-              final dstEsc = dst.replaceAll("'", "'\\''");
-              try {
-                await _runShizukuCmd('mkdir -p "$dstDirEsc" 2>/dev/null || true');
-                // Remove any pre-existing target file first — overwriting it in
-                // place would be checked against ITS OWN restrictive permissions,
-                // while creating a fresh file only needs directory write access.
-                await _runShizukuCmd("rm -f '$dstEsc' 2>/dev/null || true");
-                final data = await f.readAsBytes();
-
-                if (data.isEmpty) {
-                  await _runShizukuCmd(": > '$dstEsc'");
-                } else {
-                  var offset = 0;
-                  var first = true;
-                  while (offset < data.length) {
-                    final end = (offset + chunkSize < data.length) ? offset + chunkSize : data.length;
-                    final chunk = Uint8List.sublistView(data, offset, end);
-                    final redirect = first ? '>' : '>>';
-                    await _runShizukuCmd("cat $redirect '$dstEsc'", stdinBytes: chunk);
-                    first = false;
-                    offset = end;
-                  }
-                }
-                await _runShizukuCmd("chmod 644 '$dstEsc'");
-                copied++;
-              } catch (e) {
-                firstError ??= e.toString();
-                addLog('Не удалось скопировать ${f.path} -> $dst: ${e.toString()}');
-              }
-            }
-          }
-          if (copied == 0 && fileCount > 0) {
-            throw Exception(
-              'Не удалось скопировать ни одного файла через Shizuku${firstError != null ? ': $firstError' : ''}',
-            );
+            firstError ??= e.toString();
+            addLog('Не удалось скопировать ${f.path} -> $dst: ${e.toString()}');
           }
         }
 
-        final targetEscForCheck = finalTarget.replaceAll("'", "'\\''");
-        final validateCheck = await _runShizukuCmd(
-          "if [ -d '$targetEscForCheck/ResLib' ] || [ -d '$targetEscForCheck/files/ResLib' ] || [ -d '$targetEscForCheck/files/ResLib/Android' ]; then echo VALIDATED; else echo MISSING; fi;",
-        );
-        final validationOut = (validateCheck['stdout'] ?? '').toString().trim();
-        if (validationOut != 'VALIDATED') {
+        if (copied == 0 && allFiles.isNotEmpty) {
+          throw Exception(
+            'Не удалось скопировать ни одного файла через Shizuku${firstError != null ? ': $firstError' : ''}',
+          );
+        }
+
+        final validated = await _fsExists(path.join(finalTarget, 'ResLib')) ||
+            await _fsExists(path.join(finalTarget, 'files', 'ResLib')) ||
+            await _fsExists(path.join(finalTarget, 'files', 'ResLib', 'Android'));
+        if (!validated) {
           throw Exception('После копирования целевая папка не найдена: $finalTarget');
         }
 
         lastInstallSource = sourceDir;
         lastInstallTarget = finalTarget;
-        lastInstallFileCount = fileCount;
+        lastInstallFileCount = copied;
       } catch (e) {
         addLog('Ошибка распаковки/копирования архива: ${e.toString()}');
         rethrow;

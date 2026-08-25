@@ -10,6 +10,11 @@ android {
     compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
+    // AIDL is disabled by default since AGP 8.0; required for the Shizuku UserService interface.
+    buildFeatures {
+        aidl = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
