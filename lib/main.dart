@@ -527,11 +527,16 @@ class LauncherController extends ChangeNotifier {
 
   Future<void> _extractArchive(String zipPath, String targetDir) async {
     if (Platform.isAndroid) {
-      final publicTempRoot = Directory('/storage/emulated/0/Android/data/com.example.re_1999_solidleaf/files/SolidLeaf_Temp');
+      final extStorage = await getExternalStorageDirectory();
+      if (extStorage == null) {
+        throw Exception('Не удалось получить external storage directory');
+      }
+      final publicTempRoot = Directory(path.join(extStorage.path, 'SolidLeaf_Temp'));
       final workDir = Directory(path.join(publicTempRoot.path, 'install_${DateTime.now().millisecondsSinceEpoch}'));
 
       try {
-        await publicTempRoot.create(recursive: true);
+        // create app-specific external temp folder (accessible to this app and to shell)
+        if (!await publicTempRoot.exists()) await publicTempRoot.create(recursive: true);
         if (await workDir.exists()) {
           await workDir.delete(recursive: true);
         }
@@ -631,12 +636,12 @@ class LauncherController extends ChangeNotifier {
         rethrow;
       } finally {
         try {
-          if (await publicTempRoot.exists()) {
-            await publicTempRoot.delete(recursive: true);
-            addLog('Папка SolidLeaf_Temp удалена: ${publicTempRoot.path}');
+          if (await workDir.exists()) {
+            await workDir.delete(recursive: true);
+            addLog('Временная папка установки удалена: ${workDir.path}');
           }
         } catch (e) {
-          addLog('Не удалось удалить SolidLeaf_Temp: ${e.toString()}');
+          addLog('Не удалось удалить временную папку установки: ${e.toString()}');
         }
       }
 
