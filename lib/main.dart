@@ -565,6 +565,42 @@ class LauncherController extends ChangeNotifier {
     return (internalRoot, false);
   }
 
+  /// Android 11+ scoped storage blocks even a privileged shell (uid 2000) from
+  /// writing directly through the virtual '/storage/emulated/0/...' FUSE path
+  /// into another app's protected 'Android/data/<pkg>' folder. Some devices expose
+  /// alternate mount points that reach the same physical storage while bypassing
+  /// the FUSE daemon's write restrictions. Probe them once and reuse whichever
+  /// one actually accepts a real write.
+  Future<String?> _detectWritableBypassPrefix(String samplePath) async {
+    const scopedRoot = '/storage/emulated/0/';
+    if (!samplePath.startsWith(scopedRoot)) return null;
+    final suffix = samplePath.substring(scopedRoot.length);
+    const candidateRoots = [
+      '/mnt/pass_through/0/emulated/0/',
+      '/data/media/0/',
+      '/mnt/user/0/emulated/0/',
+    ];
+
+    for (final root in candidateRoots) {
+      final candidatePath = '$root$suffix';
+      final esc = candidatePath.replaceAll("'", "'\\''");
+      try {
+        final res = await _runShizukuCmd(
+          "mkdir -p '$esc' 2>/dev/null && touch '$esc/.solidleaf_write_test' 2>/dev/null && rm -f '$esc/.solidleaf_write_test' && echo BYPASS_OK || echo BYPASS_FAIL",
+        );
+        final out = (res['stdout'] ?? '').toString();
+        if (out.contains('BYPASS_OK')) {
+          addLog('Найден рабочий путь для обхода scoped storage: $root');
+          return root;
+        }
+      } catch (_) {
+        // Try next candidate.
+      }
+    }
+    addLog('Ни один bypass-путь не сработал, используем стандартный путь');
+    return null;
+  }
+
   Future<void> _extractArchive(String zipPath, String targetDir) async {
     if (Platform.isAndroid) {
       final (publicTempRoot, shellReadable) = await _resolveExtractionRoot();
@@ -623,10 +659,18 @@ class LauncherController extends ChangeNotifier {
           }
         }
 
+        // The game's protected data folder may reject direct writes through the
+        // virtual FUSE path even for a privileged shell (scoped storage). Probe
+        // for a working bypass mount once and reuse it for the whole copy.
+        final bypassRoot = await _detectWritableBypassPrefix(finalTarget);
+        final effectiveTarget = bypassRoot != null
+            ? finalTarget.replaceFirst('/storage/emulated/0/', bypassRoot)
+            : finalTarget;
+
         if (shellReadable) {
           // Fast path: Shizuku's shell can read our temp dir directly — copy in bulk.
           final sourceEsc = sourceDir.replaceAll("'", "'\\''");
-          final targetEsc = finalTarget.replaceAll("'", "'\\''");
+          final targetEsc = effectiveTarget.replaceAll("'", "'\\''");
 
           final command = [
             "SOURCE='$sourceEsc';",
@@ -665,7 +709,7 @@ class LauncherController extends ChangeNotifier {
             throw Exception('Shizuku недоступен для побайтовой записи файлов: ${e.toString()}');
           }
 
-          await _runShizukuCmd('mkdir -p "${finalTarget.replaceAll("'", "'\\''")}" 2>/dev/null || true');
+          await _runShizukuCmd('mkdir -p "${effectiveTarget.replaceAll("'", "'\\''")}" 2>/dev/null || true');
 
           const chunkSize = 400 * 1024; // raw bytes per stdin chunk — safe under Binder transaction limits
           int copied = 0;
@@ -674,7 +718,7 @@ class LauncherController extends ChangeNotifier {
             final files = sourceDirectory.listSync(recursive: true).whereType<File>();
             for (final f in files) {
               final rel = path.relative(f.path, from: sourceDir);
-              final dst = path.join(finalTarget, rel);
+              final dst = path.join(effectiveTarget, rel);
               final dstDirEsc = path.dirname(dst).replaceAll("'", "'\\''");
               final dstEsc = dst.replaceAll("'", "'\\''");
               try {
@@ -710,7 +754,7 @@ class LauncherController extends ChangeNotifier {
           }
         }
 
-        final targetEscForCheck = finalTarget.replaceAll("'", "'\\''");
+        final targetEscForCheck = effectiveTarget.replaceAll("'", "'\\''");
         final validateCheck = await _runShizukuCmd(
           "if [ -d '$targetEscForCheck/ResLib' ] || [ -d '$targetEscForCheck/files/ResLib' ] || [ -d '$targetEscForCheck/files/ResLib/Android' ]; then echo VALIDATED; else echo MISSING; fi;",
         );
