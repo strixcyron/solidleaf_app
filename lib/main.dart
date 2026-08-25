@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:convert';
 
 import 'package:archive/archive.dart';
 import 'package:dio/dio.dart';
@@ -528,22 +527,22 @@ class LauncherController extends ChangeNotifier {
 
   Future<void> _extractArchive(String zipPath, String targetDir) async {
     if (Platform.isAndroid) {
-      // Two-step extraction to avoid relying on device 'unzip':
-      // 1) extract archive in Dart to a temp directory
-      // 2) use Shizuku to copy contents into the protected target
-      // 3) remove temp directory
-      final tempDir = await getExternalStorageDirectory() ?? await getTemporaryDirectory();
-      final extractDir = path.join(tempDir.path, 'reverse1999_extract_${DateTime.now().millisecondsSinceEpoch}');
-      final extractDirObj = Directory(extractDir);
+      final publicTempRoot = Directory('/storage/emulated/0/Android/data/com.example.re_1999_solidleaf/files/SolidLeaf_Temp');
+      final workDir = Directory(path.join(publicTempRoot.path, 'install_${DateTime.now().millisecondsSinceEpoch}'));
+
       try {
-        if (!await extractDirObj.exists()) await extractDirObj.create(recursive: true);
+        await publicTempRoot.create(recursive: true);
+        if (await workDir.exists()) {
+          await workDir.delete(recursive: true);
+        }
+        await workDir.create(recursive: true);
 
         final archiveFile = File(zipPath);
         final bytes = await archiveFile.readAsBytes();
         final archive = ZipDecoder().decodeBytes(bytes);
 
         for (final file in archive) {
-          final outPath = path.join(extractDir, file.name);
+          final outPath = path.join(workDir.path, file.name);
           if (file.isFile) {
             final data = file.content as List<int>;
             final outFile = File(outPath);
@@ -554,36 +553,27 @@ class LauncherController extends ChangeNotifier {
           }
         }
 
-        // Ensure target exists and copy extracted contents into it using Shizuku
-        final normExtract = path.normalize(extractDir);
         final normTarget = path.normalize(targetDir);
-        await _runShizukuCmd('mkdir -p "$normTarget" 2>/dev/null || true');
-        // Determine temp and target, and handle multiple archive layouts
-        final tempPathVar = normExtract;
-        final targetPathVar = normTarget;
+        String sourceDir = workDir.path;
+        String finalTarget = normTarget;
 
-        // 1. Universal search for luabytes anchor
         Directory? luabytesDir;
         try {
-          luabytesDir = Directory(tempPathVar).listSync(recursive: true)
+          luabytesDir = Directory(sourceDir).listSync(recursive: true)
               .whereType<Directory>()
               .firstWhere((d) => path.basename(d.path).toLowerCase() == 'luabytes');
-        } catch (e) {
+        } catch (_) {
           luabytesDir = null;
         }
 
-        String sourceDir = tempPathVar;
-        String finalTarget = targetPathVar;
         if (luabytesDir != null) {
           sourceDir = path.normalize(luabytesDir.parent.path);
-          finalTarget = path.join(targetPathVar, 'files', 'ResLib', 'Android');
+          finalTarget = path.join(normTarget, 'files', 'ResLib', 'Android');
         }
 
-        // Normalize
         sourceDir = path.normalize(sourceDir);
         finalTarget = path.normalize(finalTarget);
 
-        // Count files for the report
         int fileCount = 0;
         final sourceDirectory = Directory(sourceDir);
         if (sourceDirectory.existsSync()) {
@@ -594,60 +584,55 @@ class LauncherController extends ChangeNotifier {
           }
         }
 
-        // Ensure base target exists
-        await _runShizukuCmd('mkdir -p "${finalTarget.replaceAll("'", "'\\''")}" 2>/dev/null || true');
+        final sourceEsc = sourceDir.replaceAll("'", "'\\''");
+        final targetEsc = finalTarget.replaceAll("'", "'\\''");
 
-        // Copy files individually. Use Shizuku to create directories and to write each file via base64 -> base64 -d
-        int copied = 0;
-        final srcDirObj = Directory(sourceDir);
-        if (srcDirObj.existsSync()) {
-          final files = srcDirObj.listSync(recursive: true).whereType<File>();
-          for (final f in files) {
-            final rel = path.relative(f.path, from: sourceDir);
-            final dst = path.join(finalTarget, rel);
-            final dstDir = path.dirname(dst);
+        final command = [
+          "SOURCE='$sourceEsc';",
+          "TARGET='$targetEsc';",
+          r'if [ ! -d "$SOURCE" ]; then echo "SOURCE_NOT_FOUND" >&2; exit 1; fi;',
+          r'mkdir -p "$TARGET" 2>/dev/null || { echo "TARGET_MKDIR_FAILED" >&2; exit 1; };',
+          r'cp -rf "$SOURCE"/. "$TARGET"/;',
+          r'chmod -R 777 "$TARGET" 2>/dev/null || true;',
+          r'if [ ! -d "$TARGET/ResLib" ] && [ ! -d "$TARGET/files/ResLib" ] && [ ! -d "$TARGET/files/ResLib/Android" ]; then',
+          'echo "COPY_VALIDATION_FAILED" >&2;',
+          'exit 1;',
+          'fi;',
+          'echo "COPY_OK";',
+        ].join(' ');
 
-            final dstDirEsc = dstDir.replaceAll("'", "'\\''");
-            final dstEsc = dst.replaceAll("'", "'\\''");
-
-            try {
-              // ensure directory exists using Shizuku
-              await _runShizukuCmd('mkdir -p "$dstDirEsc" 2>/dev/null || true');
-
-              // read bytes and push via base64 through Shizuku
-              final bytes = await File(f.path).readAsBytes();
-              final b64 = base64.encode(bytes);
-
-              final cmd = "printf '%s' '$b64' | base64 -d > '$dstEsc' && chmod 644 '$dstEsc'";
-              await _runShizukuCmd(cmd);
-              copied++;
-            } catch (e) {
-              addLog('Не удалось скопировать ${f.path} -> $dst: ${e.toString()}');
-              // continue processing other files
-            }
-          }
+        final copyResult = await _runShizukuCmd(command);
+        final stdout = (copyResult['stdout'] ?? '').toString();
+        final stderr = (copyResult['stderr'] ?? '').toString();
+        final validationText = (stdout + stderr).trim();
+        if (validationText.contains('COPY_VALIDATION_FAILED') ||
+            validationText.contains('SOURCE_NOT_FOUND') ||
+            validationText.contains('TARGET_MKDIR_FAILED')) {
+          throw Exception('Shizuku копирование не подтвердилось: $validationText');
         }
 
-        // Save report
-        lastInstallSource = sourceDir;
-        lastInstallTarget = finalTarget;
-        lastInstallFileCount = copied;
-        // Save report after successful run
+        final validateCheck = await _runShizukuCmd(
+          "if [ -d '$targetEsc/ResLib' ] || [ -d '$targetEsc/files/ResLib' ] || [ -d '$targetEsc/files/ResLib/Android' ]; then echo VALIDATED; else echo MISSING; fi;",
+        );
+        final validationOut = (validateCheck['stdout'] ?? '').toString().trim();
+        if (validationOut != 'VALIDATED') {
+          throw Exception('После копирования целевая папка не найдена: $finalTarget');
+        }
+
         lastInstallSource = sourceDir;
         lastInstallTarget = finalTarget;
         lastInstallFileCount = fileCount;
-
       } catch (e) {
         addLog('Ошибка распаковки/копирования архива: ${e.toString()}');
         rethrow;
       } finally {
         try {
-          if (await extractDirObj.exists()) {
-            await extractDirObj.delete(recursive: true);
-            addLog('Временная папка распаковки удалена: $extractDir');
+          if (await publicTempRoot.exists()) {
+            await publicTempRoot.delete(recursive: true);
+            addLog('Папка SolidLeaf_Temp удалена: ${publicTempRoot.path}');
           }
         } catch (e) {
-          addLog('Не удалось удалить временную папку: ${e.toString()}');
+          addLog('Не удалось удалить SolidLeaf_Temp: ${e.toString()}');
         }
       }
 
