@@ -659,9 +659,17 @@ class LauncherController extends ChangeNotifier {
           // Slow but universal path: shell cannot read our internal cache, so we
           // push each file's bytes through the MethodChannel as base64 and let
           // Shizuku write them directly at the target.
+          try {
+            await _runShizukuCmd('echo shizuku_probe_ok');
+          } catch (e) {
+            throw Exception('Shizuku недоступен для побайтовой записи файлов: ${e.toString()}');
+          }
+
           await _runShizukuCmd('mkdir -p "${finalTarget.replaceAll("'", "'\\''")}" 2>/dev/null || true');
 
+          const chunkSize = 150000; // raw bytes per chunk (~200KB base64) — stays under Binder/ARG_MAX limits
           int copied = 0;
+          String? firstError;
           if (sourceDirectory.existsSync()) {
             final files = sourceDirectory.listSync(recursive: true).whereType<File>();
             for (final f in files) {
@@ -672,16 +680,34 @@ class LauncherController extends ChangeNotifier {
               try {
                 await _runShizukuCmd('mkdir -p "$dstDirEsc" 2>/dev/null || true');
                 final data = await f.readAsBytes();
-                final b64 = base64.encode(data);
-                await _runShizukuCmd("printf '%s' '$b64' | base64 -d > '$dstEsc' && chmod 644 '$dstEsc'");
+
+                if (data.isEmpty) {
+                  await _runShizukuCmd(": > '$dstEsc'");
+                } else {
+                  var offset = 0;
+                  var first = true;
+                  while (offset < data.length) {
+                    final end = (offset + chunkSize < data.length) ? offset + chunkSize : data.length;
+                    final chunk = data.sublist(offset, end);
+                    final b64 = base64.encode(chunk);
+                    final redirect = first ? '>' : '>>';
+                    await _runShizukuCmd("printf '%s' '$b64' | base64 -d $redirect '$dstEsc'");
+                    first = false;
+                    offset = end;
+                  }
+                }
+                await _runShizukuCmd("chmod 644 '$dstEsc'");
                 copied++;
               } catch (e) {
+                firstError ??= e.toString();
                 addLog('Не удалось скопировать ${f.path} -> $dst: ${e.toString()}');
               }
             }
           }
           if (copied == 0 && fileCount > 0) {
-            throw Exception('Не удалось скопировать ни одного файла через Shizuku');
+            throw Exception(
+              'Не удалось скопировать ни одного файла через Shizuku${firstError != null ? ': $firstError' : ''}',
+            );
           }
         }
 
