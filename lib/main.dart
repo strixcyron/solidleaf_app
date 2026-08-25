@@ -687,9 +687,12 @@ class LauncherController extends ChangeNotifier {
           );
         }
 
-        final validated = await _fsExists(path.join(finalTarget, 'ResLib')) ||
-            await _fsExists(path.join(finalTarget, 'files', 'ResLib')) ||
-            await _fsExists(path.join(finalTarget, 'files', 'ResLib', 'Android'));
+        // finalTarget is already the fully-resolved destination (it may already
+        // be ".../files/ResLib/Android" when a luabytes anchor was found), so
+        // just confirm it exists — checking for a nested "ResLib" subfolder
+        // INSIDE it would never match and was a leftover from an earlier
+        // validation scheme that checked the raw install root instead.
+        final validated = await _fsExists(finalTarget);
         if (!validated) {
           throw Exception('После копирования целевая папка не найдена: $finalTarget');
         }
