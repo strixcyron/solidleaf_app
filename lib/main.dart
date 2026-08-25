@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
@@ -525,18 +526,51 @@ class LauncherController extends ChangeNotifier {
   String? lastInstallTarget;
   int lastInstallFileCount = 0;
 
+  /// Finds a temp directory that Dart can write to for extraction.
+  /// Prefers a location visible to Shizuku's shell (external/app-specific dirs);
+  /// falls back to the internal cache directory if nothing else is writable.
+  /// Returns the directory plus whether it's expected to be shell-readable.
+  Future<(Directory dir, bool shellReadable)> _resolveExtractionRoot() async {
+    final candidates = <Future<Directory?> Function()>[
+      () async => await getExternalStorageDirectory(),
+      () async => Directory('/storage/emulated/0/Android/data/com.example.re_1999_solidleaf/files'),
+    ];
+
+    for (final candidateFn in candidates) {
+      try {
+        final candidate = await candidateFn();
+        if (candidate == null) continue;
+        final root = Directory(path.join(candidate.path, 'SolidLeaf_Temp'));
+        if (!await root.exists()) {
+          await root.create(recursive: true);
+        }
+        // Verify writability with a probe file
+        final probe = File(path.join(root.path, '.probe'));
+        await probe.writeAsBytes(const [1]);
+        await probe.delete();
+        return (root, true);
+      } catch (e) {
+        addLog('Временная папка недоступна (${e.toString()}), пробуем другой вариант...');
+        continue;
+      }
+    }
+
+    // Last resort: internal cache — always writable by the app but NOT readable by shell (SELinux).
+    final internal = await getTemporaryDirectory();
+    final internalRoot = Directory(path.join(internal.path, 'SolidLeaf_Temp'));
+    if (!await internalRoot.exists()) {
+      await internalRoot.create(recursive: true);
+    }
+    addLog('Внешние директории недоступны, используем внутренний кэш (файлы будут переданы через Shizuku поштучно)');
+    return (internalRoot, false);
+  }
+
   Future<void> _extractArchive(String zipPath, String targetDir) async {
     if (Platform.isAndroid) {
-      final extStorage = await getExternalStorageDirectory();
-      if (extStorage == null) {
-        throw Exception('Не удалось получить external storage directory');
-      }
-      final publicTempRoot = Directory(path.join(extStorage.path, 'SolidLeaf_Temp'));
+      final (publicTempRoot, shellReadable) = await _resolveExtractionRoot();
       final workDir = Directory(path.join(publicTempRoot.path, 'install_${DateTime.now().millisecondsSinceEpoch}'));
 
       try {
-        // create app-specific external temp folder (accessible to this app and to shell)
-        if (!await publicTempRoot.exists()) await publicTempRoot.create(recursive: true);
         if (await workDir.exists()) {
           await workDir.delete(recursive: true);
         }
@@ -589,39 +623,71 @@ class LauncherController extends ChangeNotifier {
           }
         }
 
-        final sourceEsc = sourceDir.replaceAll("'", "'\\''");
-        final targetEsc = finalTarget.replaceAll("'", "'\\''");
+        if (shellReadable) {
+          // Fast path: Shizuku's shell can read our temp dir directly — copy in bulk.
+          final sourceEsc = sourceDir.replaceAll("'", "'\\''");
+          final targetEsc = finalTarget.replaceAll("'", "'\\''");
 
-        final command = [
-          "SOURCE='$sourceEsc';",
-          "TARGET='$targetEsc';",
-          r'if [ ! -d "$SOURCE" ]; then echo "SOURCE_NOT_FOUND" >&2; exit 1; fi;',
-          r'mkdir -p "$TARGET" 2>/dev/null || { echo "TARGET_MKDIR_FAILED" >&2; exit 1; };',
-          r'if command -v tar >/dev/null 2>&1; then',
-          r'  tar -C "$SOURCE" -cf - . | tar -C "$TARGET" -xpf -;',
-          r'else',
-          r'  cp -a "$SOURCE"/. "$TARGET"/;',
-          r'fi;',
-          r'chmod -R 777 "$TARGET" 2>/dev/null || true;',
-          r'if [ ! -d "$TARGET/ResLib" ] && [ ! -d "$TARGET/files/ResLib" ] && [ ! -d "$TARGET/files/ResLib/Android" ]; then',
-          'echo "COPY_VALIDATION_FAILED" >&2;',
-          'exit 1;',
-          'fi;',
-          'echo "COPY_OK";',
-        ].join(' ');
+          final command = [
+            "SOURCE='$sourceEsc';",
+            "TARGET='$targetEsc';",
+            r'if [ ! -d "$SOURCE" ]; then echo "SOURCE_NOT_FOUND" >&2; exit 1; fi;',
+            r'mkdir -p "$TARGET" 2>/dev/null || { echo "TARGET_MKDIR_FAILED" >&2; exit 1; };',
+            r'if command -v tar >/dev/null 2>&1; then',
+            r'  tar -C "$SOURCE" -cf - . | tar -C "$TARGET" -xpf -;',
+            r'else',
+            r'  cp -a "$SOURCE"/. "$TARGET"/;',
+            r'fi;',
+            r'chmod -R 777 "$TARGET" 2>/dev/null || true;',
+            r'if [ ! -d "$TARGET/ResLib" ] && [ ! -d "$TARGET/files/ResLib" ] && [ ! -d "$TARGET/files/ResLib/Android" ]; then',
+            'echo "COPY_VALIDATION_FAILED" >&2;',
+            'exit 1;',
+            'fi;',
+            'echo "COPY_OK";',
+          ].join(' ');
 
-        final copyResult = await _runShizukuCmd(command);
-        final stdout = (copyResult['stdout'] ?? '').toString();
-        final stderr = (copyResult['stderr'] ?? '').toString();
-        final validationText = (stdout + stderr).trim();
-        if (validationText.contains('COPY_VALIDATION_FAILED') ||
-            validationText.contains('SOURCE_NOT_FOUND') ||
-            validationText.contains('TARGET_MKDIR_FAILED')) {
-          throw Exception('Shizuku копирование не подтвердилось: $validationText');
+          final copyResult = await _runShizukuCmd(command);
+          final stdout = (copyResult['stdout'] ?? '').toString();
+          final stderr = (copyResult['stderr'] ?? '').toString();
+          final validationText = (stdout + stderr).trim();
+          if (validationText.contains('COPY_VALIDATION_FAILED') ||
+              validationText.contains('SOURCE_NOT_FOUND') ||
+              validationText.contains('TARGET_MKDIR_FAILED')) {
+            throw Exception('Shizuku копирование не подтвердилось: $validationText');
+          }
+        } else {
+          // Slow but universal path: shell cannot read our internal cache, so we
+          // push each file's bytes through the MethodChannel as base64 and let
+          // Shizuku write them directly at the target.
+          await _runShizukuCmd('mkdir -p "${finalTarget.replaceAll("'", "'\\''")}" 2>/dev/null || true');
+
+          int copied = 0;
+          if (sourceDirectory.existsSync()) {
+            final files = sourceDirectory.listSync(recursive: true).whereType<File>();
+            for (final f in files) {
+              final rel = path.relative(f.path, from: sourceDir);
+              final dst = path.join(finalTarget, rel);
+              final dstDirEsc = path.dirname(dst).replaceAll("'", "'\\''");
+              final dstEsc = dst.replaceAll("'", "'\\''");
+              try {
+                await _runShizukuCmd('mkdir -p "$dstDirEsc" 2>/dev/null || true');
+                final data = await f.readAsBytes();
+                final b64 = base64.encode(data);
+                await _runShizukuCmd("printf '%s' '$b64' | base64 -d > '$dstEsc' && chmod 644 '$dstEsc'");
+                copied++;
+              } catch (e) {
+                addLog('Не удалось скопировать ${f.path} -> $dst: ${e.toString()}');
+              }
+            }
+          }
+          if (copied == 0 && fileCount > 0) {
+            throw Exception('Не удалось скопировать ни одного файла через Shizuku');
+          }
         }
 
+        final targetEscForCheck = finalTarget.replaceAll("'", "'\\''");
         final validateCheck = await _runShizukuCmd(
-          "if [ -d '$targetEsc/ResLib' ] || [ -d '$targetEsc/files/ResLib' ] || [ -d '$targetEsc/files/ResLib/Android' ]; then echo VALIDATED; else echo MISSING; fi;",
+          "if [ -d '$targetEscForCheck/ResLib' ] || [ -d '$targetEscForCheck/files/ResLib' ] || [ -d '$targetEscForCheck/files/ResLib/Android' ]; then echo VALIDATED; else echo MISSING; fi;",
         );
         final validationOut = (validateCheck['stdout'] ?? '').toString().trim();
         if (validationOut != 'VALIDATED') {
