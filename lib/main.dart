@@ -821,107 +821,6 @@ class _MainScreenState extends State<MainScreen> {
     super.dispose();
   }
 
-  Future<void> _checkAndShowUpdateDialog() async {
-    final controller = context.read<LauncherController>();
-
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1B1826),
-          title: const Text('Проверка обновлений'),
-          content: const SizedBox(
-            width: 300,
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                SizedBox(width: 16),
-                Expanded(child: Text('Запрашиваем релиз с GitHub...')),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Отмена'),
-            ),
-          ],
-        );
-      },
-    );
-
-    try {
-      await controller.checkForUpdates();
-      if (!mounted) {
-        return;
-      }
-
-      final rootNavigator = Navigator.of(context, rootNavigator: true);
-      final bool canRootPop = rootNavigator.canPop();
-      if (canRootPop) {
-        rootNavigator.pop();
-      }
-
-      if (!controller.hasUpdate) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Обновлений не найдено.')),
-        );
-        return;
-      }
-
-      await showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) {
-          return AlertDialog(
-            backgroundColor: const Color(0xFF1B1826),
-            title: Text('Доступно обновление ${controller.remoteVersion}'),
-            content: SizedBox(
-              width: 420,
-              child: SingleChildScrollView(
-                child: Text(
-                  controller.changelog.isEmpty
-                      ? 'Список изменений отсутствует.'
-                      : controller.changelog,
-                  style: const TextStyle(color: Colors.white70, fontSize: 13),
-                ),
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Позже'),
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF7B52F4),
-                ),
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  _runInstallFlow();
-                },
-                child: const Text('Обновить', style: TextStyle(color: Colors.white)),
-              ),
-            ],
-          );
-        },
-      );
-    } catch (_) {
-      if (mounted == true) {
-        final rootNavigator = Navigator.of(context, rootNavigator: true);
-        final bool canRootPop = rootNavigator.canPop();
-        if (canRootPop) {
-          rootNavigator.pop();
-        }
-      }
-    }
-  }
-
   Future<void> _runInstallFlow() async {
     final controller = context.read<LauncherController>();
 
@@ -929,69 +828,10 @@ class _MainScreenState extends State<MainScreen> {
       return;
     }
 
-    unawaited(
-      showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (dialogContext) {
-          return Consumer<LauncherController>(
-            builder: (context, value, child) {
-              final progressPercent = value.isDownloading ? (value.downloadProgress * 100).clamp(0, 100).toInt() : 0;
-              return AlertDialog(
-                backgroundColor: const Color(0xFF1B1826),
-                title: Text(
-                  value.isDownloading ? 'Обновление ${value.remoteVersion}' : 'Установка завершена',
-                  style: const TextStyle(fontSize: 18),
-                ),
-                content: SizedBox(
-                  width: 420,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        value.isDownloading
-                            ? 'Скачивание обновления...'
-                            : value.statusText,
-                        style: const TextStyle(color: Colors.white70),
-                      ),
-                      const SizedBox(height: 16),
-                      const LinearProgressIndicator(
-                        value: null,
-                        minHeight: 10,
-                        backgroundColor: Color(0xFF2E2541),
-                        color: Color(0xFF8A6AF6),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        value.isDownloading
-                            ? 'Загружено: $progressPercent%'
-                            : 'Готово',
-                        style: const TextStyle(color: Colors.white70, fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
-                actions: [
-                  if (!value.isDownloading)
-                    TextButton(
-                      onPressed: () => Navigator.of(dialogContext).pop(),
-                      child: const Text('Закрыть'),
-                    ),
-                ],
-              );
-            },
-          );
-        },
-      ),
-    );
-
     try {
       await controller.installOrUpdate();
       if (mounted) {
-        // Close the progress overlay
-        Navigator.of(context, rootNavigator: true).pop();
-        // If controller has an install report, show a detailed dialog
+        // If controller has an install report, show a detailed summary dialog.
         final src = controller.lastInstallSource;
         if (src != null) {
           final tgt = controller.lastInstallTarget ?? '';
@@ -1010,10 +850,7 @@ class _MainScreenState extends State<MainScreen> {
         }
       }
     } catch (e) {
-      if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
-      }
-      rethrow;
+      // Errors are already surfaced via controller.statusText/logs in the main UI.
     }
   }
 
@@ -1115,16 +952,8 @@ class _MainScreenState extends State<MainScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Reverse: 1999',
-                  style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 4),
-                const Text(
-                  'Полная русификация (текст, интерфейс и графика)',
-                  style: TextStyle(color: Colors.grey, fontSize: 14),
-                ),
-                const SizedBox(height: 26),
+                _buildCoverArt(controller, height: 190),
+                const SizedBox(height: 22),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   decoration: BoxDecoration(
@@ -1158,33 +987,19 @@ class _MainScreenState extends State<MainScreen> {
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(18),
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF1A1627),
-                    borderRadius: BorderRadius.all(Radius.circular(16)),
-                    border: Border.fromBorderSide(BorderSide(color: Color(0xFF2D2240), width: 1)),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.check_circle_rounded, color: Color(0xFF8A6AF6)),
-                      SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Русская локализация', style: TextStyle(fontWeight: FontWeight.bold)),
-                            SizedBox(height: 2),
-                            Text(
-                              'Перевод сюжета, текстур и внутриигровых меню',
-                              style: TextStyle(color: Colors.grey, fontSize: 12),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Text('~350 MB', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                    ],
-                  ),
+                _buildComponentTile(
+                  icon: Icons.translate_rounded,
+                  title: 'Текстовая локализация',
+                  subtitle: 'Перевод сюжета и внутриигровых меню',
+                  trailing: _buildVersionBadge(controller),
+                ),
+                const SizedBox(height: 10),
+                _buildComponentTile(
+                  icon: Icons.image_rounded,
+                  title: 'Графика и текстуры',
+                  subtitle: 'Локализация интерфейса и текстур — в разработке',
+                  trailing: _buildComingSoonBadge(),
+                  dimmed: true,
                 ),
                 const SizedBox(height: 18),
                 Container(
@@ -1237,11 +1052,6 @@ class _MainScreenState extends State<MainScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       TextButton(
-                        onPressed: _checkAndShowUpdateDialog,
-                        child: const Text('Проверить обновления', style: TextStyle(color: Colors.white70)),
-                      ),
-                      const SizedBox(width: 12),
-                      TextButton(
                         onPressed: () async {
                           final confirmed = await showDialog<bool>(
                             context: context,
@@ -1269,6 +1079,12 @@ class _MainScreenState extends State<MainScreen> {
                           }
                         },
                         child: const Text('Удалить', style: TextStyle(color: Colors.grey)),
+                      ),
+                      const SizedBox(width: 12),
+                      OutlinedButton.icon(
+                        onPressed: null,
+                        icon: const Icon(Icons.image_not_supported_rounded, size: 18),
+                        label: const Text('Текстуры (скоро)'),
                       ),
                       const SizedBox(width: 12),
                       ElevatedButton(
@@ -1299,133 +1115,310 @@ class _MainScreenState extends State<MainScreen> {
   Widget _buildAndroidLayout(LauncherController controller) {
     return Padding(
       padding: const EdgeInsets.all(18),
-      child: Column(
-        children: [
-          const SizedBox(height: 20),
-          Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  'SOLIDLEAF TEAM',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-              ),
-              ElevatedButton.icon(
-                onPressed: controller.checkShizukuStatus,
-                icon: const Icon(Icons.security_rounded),
-                label: const Text('Shizuku'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1A1627),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: const Color(0xFF4E3B8A), width: 1),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      child: SingleChildScrollView(
+        child: Column(
+          children: [
+            const SizedBox(height: 20),
+            Row(
               children: [
-                const Text('Reverse: 1999', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                Text(
-                  controller.isShizukuActive ? 'Статус: Shizuku активен' : 'Статус: Shizuku не активен',
-                  style: const TextStyle(color: Colors.white70),
-                ),
-                const SizedBox(height: 14),
-                if (controller.isDownloading)
-                  LinearProgressIndicator(
-                    value: controller.downloadProgress == 0 ? null : controller.downloadProgress,
-                    minHeight: 12,
-                    backgroundColor: const Color(0xFF2E2541),
-                    color: const Color(0xFF8A6AF6),
+                const Expanded(
+                  child: Text(
+                    'SOLIDLEAF TEAM',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                   ),
-                const SizedBox(height: 12),
-                Text('Версия: ${controller.currentVersion}', style: const TextStyle(color: Colors.grey)),
-                const SizedBox(height: 12),
-                Text(controller.statusText, style: const TextStyle(color: Colors.white)),
+                ),
+                ElevatedButton.icon(
+                  onPressed: controller.checkShizukuStatus,
+                  icon: const Icon(Icons.security_rounded),
+                  label: const Text('Shizuku'),
+                ),
               ],
             ),
-          ),
-          const SizedBox(height: 18),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF17131F),
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: Text(
-              controller.changelog.isEmpty
-                  ? 'Список изменений пока недоступен.'
-                  : controller.changelog.length > 180
-                      ? '${controller.changelog.substring(0, 180)}...'
-                      : controller.changelog,
-              style: const TextStyle(color: Colors.white70, fontSize: 12),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: _checkAndShowUpdateDialog,
-                  child: const Text('Проверить обновления'),
-                ),
+            const SizedBox(height: 16),
+            _buildCoverArt(controller, height: 170),
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1A1627),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: const Color(0xFF4E3B8A), width: 1),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () async {
-                    final confirmed = await showDialog<bool>(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        backgroundColor: const Color(0xFF1B1826),
-                        title: const Text('Восстановление оригинальных файлов'),
-                        content: const Text('Вы уверены, что хотите восстановить оригинальные файлы из бэкапа? Это удалит русификатор.'),
-                        actions: [
-                          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Отмена')),
-                          ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Восстановить')),
-                        ],
-                      ),
-                    );
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    controller.isShizukuActive ? 'Статус: Shizuku активен' : 'Статус: Shizuku не активен',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                  const SizedBox(height: 14),
+                  if (controller.isDownloading)
+                    LinearProgressIndicator(
+                      value: controller.downloadProgress == 0 ? null : controller.downloadProgress,
+                      minHeight: 12,
+                      backgroundColor: const Color(0xFF2E2541),
+                      color: const Color(0xFF8A6AF6),
+                    ),
+                  const SizedBox(height: 12),
+                  Text(controller.statusText, style: const TextStyle(color: Colors.white)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            _buildComponentTile(
+              icon: Icons.translate_rounded,
+              title: 'Текстовая локализация',
+              subtitle: 'Перевод сюжета и внутриигровых меню',
+              trailing: _buildVersionBadge(controller),
+            ),
+            const SizedBox(height: 10),
+            _buildComponentTile(
+              icon: Icons.image_rounded,
+              title: 'Графика и текстуры',
+              subtitle: 'Локализация интерфейса — в разработке',
+              trailing: _buildComingSoonBadge(),
+              dimmed: true,
+            ),
+            const SizedBox(height: 18),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF17131F),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Text(
+                controller.changelog.isEmpty
+                    ? 'Список изменений пока недоступен.'
+                    : controller.changelog.length > 180
+                        ? '${controller.changelog.substring(0, 180)}...'
+                        : controller.changelog,
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () async {
+                      final confirmed = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          backgroundColor: const Color(0xFF1B1826),
+                          title: const Text('Восстановление оригинальных файлов'),
+                          content: const Text('Вы уверены, что хотите восстановить оригинальные файлы из бэкапа? Это удалит русификатор.'),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Отмена')),
+                            ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Восстановить')),
+                          ],
+                        ),
+                      );
 
-                    if (!mounted) return;
-                    if (confirmed == true) {
-                      try {
-                        await controller.restoreBackup();
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Восстановление завершено')));
-                      } catch (e) {
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка восстановления: ${e.toString()}')));
+                      if (!mounted) return;
+                      if (confirmed == true) {
+                        try {
+                          await controller.restoreBackup();
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Восстановление завершено')));
+                        } catch (e) {
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка восстановления: ${e.toString()}')));
+                        }
                       }
-                    }
-                  },
-                  child: const Text('Удалить', style: TextStyle(color: Colors.grey)),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF7B52F4),
-                    padding: const EdgeInsets.symmetric(vertical: 18),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  ),
-                  onPressed: controller.isDownloading ? null : _runInstallFlow,
-                  child: Text(
-                    controller.hasUpdate ? 'Обновить' : 'Установить',
-                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                    },
+                    child: const Text('Удалить', style: TextStyle(color: Colors.grey)),
                   ),
                 ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF7B52F4),
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                    onPressed: controller.isDownloading ? null : _runInstallFlow,
+                    child: Text(
+                      controller.hasUpdate ? 'Обновить' : 'Установить',
+                      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: null,
+                icon: const Icon(Icons.image_not_supported_rounded, size: 18),
+                label: const Text('Текстуры (скоро)'),
               ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Hero-style cover art for the game, with a gradient scrim, title and the
+  /// color-coded version badge overlaid at the bottom. Falls back to a
+  /// decorative gradient placeholder if `assets/images/cover.jpg` hasn't been
+  /// added yet (see assets/images/README.md).
+  Widget _buildCoverArt(LauncherController controller, {double height = 180}) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: SizedBox(
+        height: height,
+        width: double.infinity,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.asset(
+              'assets/images/cover.jpg',
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) => const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Color(0xFF3A2B6E), Color(0xFF1B1430)],
+                  ),
+                ),
+              ),
+            ),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.transparent, Colors.black.withValues(alpha: 0.78)],
+                  stops: const [0.35, 1.0],
+                ),
+              ),
+            ),
+            Positioned(
+              left: 20,
+              right: 20,
+              bottom: 16,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  const Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Reverse: 1999',
+                          style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Полная русификация (текст, интерфейс и графика)',
+                          style: TextStyle(color: Colors.white70, fontSize: 13),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  _buildVersionBadge(controller),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Color-codes the installed localization state: grey when not installed,
+  /// amber when an update is available, green when up to date.
+  Widget _buildVersionBadge(LauncherController controller) {
+    final notInstalled = controller.currentVersion == 'v0.0.0';
+    final Color color;
+    final String label;
+    final IconData icon;
+    if (notInstalled) {
+      color = Colors.grey.shade400;
+      label = 'Не установлено';
+      icon = Icons.remove_circle_outline_rounded;
+    } else if (controller.hasUpdate) {
+      color = const Color(0xFFFFA726);
+      label = 'Обновление ${controller.remoteVersion}';
+      icon = Icons.upgrade_rounded;
+    } else {
+      color = const Color(0xFF4CAF50);
+      label = controller.currentVersion;
+      icon = Icons.check_circle_rounded;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color, width: 1),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 15),
+          const SizedBox(width: 6),
+          Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 12)),
         ],
+      ),
+    );
+  }
+
+  Widget _buildComingSoonBadge() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white10,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: const Text('Скоро', style: TextStyle(color: Colors.grey, fontSize: 11, fontWeight: FontWeight.w600)),
+    );
+  }
+
+  /// A single localization component row (e.g. text or texture pack), with an
+  /// optional trailing badge and a dimmed look for not-yet-available components.
+  Widget _buildComponentTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    Widget? trailing,
+    bool dimmed = false,
+  }) {
+    return Opacity(
+      opacity: dimmed ? 0.55 : 1.0,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1A1627),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFF2D2240), width: 1),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: const Color(0xFF8A6AF6)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 2),
+                  Text(subtitle, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                ],
+              ),
+            ),
+            if (trailing != null) trailing,
+          ],
+        ),
       ),
     );
   }
