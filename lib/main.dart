@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
@@ -148,10 +147,11 @@ class LauncherController extends ChangeNotifier {
     return path.join(base, relative);
   }
 
-  Future<Map<String, dynamic>> _runShizukuCmd(String command) async {
+  Future<Map<String, dynamic>> _runShizukuCmd(String command, {Uint8List? stdinBytes}) async {
     try {
       const methodChannel = MethodChannel(shizukuChannel);
-      final result = await methodChannel.invokeMethod<Map>('executeShellCommand', command);
+      final dynamic argument = stdinBytes != null ? {'command': command, 'stdin': stdinBytes} : command;
+      final result = await methodChannel.invokeMethod<Map>('executeShellCommand', argument);
       if (result == null) throw Exception('Shizuku command returned no result');
       final map = Map<String, dynamic>.from(result.cast<String, dynamic>());
       final exitCodeRaw = map['exitCode'];
@@ -657,8 +657,8 @@ class LauncherController extends ChangeNotifier {
           }
         } else {
           // Slow but universal path: shell cannot read our internal cache, so we
-          // push each file's bytes through the MethodChannel as base64 and let
-          // Shizuku write them directly at the target.
+          // stream each file's bytes to Shizuku via process stdin (avoids the
+          // Linux MAX_ARG_STRLEN limit that a giant command-line argument would hit).
           try {
             await _runShizukuCmd('echo shizuku_probe_ok');
           } catch (e) {
@@ -667,7 +667,7 @@ class LauncherController extends ChangeNotifier {
 
           await _runShizukuCmd('mkdir -p "${finalTarget.replaceAll("'", "'\\''")}" 2>/dev/null || true');
 
-          const chunkSize = 150000; // raw bytes per chunk (~200KB base64) — stays under Binder/ARG_MAX limits
+          const chunkSize = 400 * 1024; // raw bytes per stdin chunk — safe under Binder transaction limits
           int copied = 0;
           String? firstError;
           if (sourceDirectory.existsSync()) {
@@ -688,10 +688,9 @@ class LauncherController extends ChangeNotifier {
                   var first = true;
                   while (offset < data.length) {
                     final end = (offset + chunkSize < data.length) ? offset + chunkSize : data.length;
-                    final chunk = data.sublist(offset, end);
-                    final b64 = base64.encode(chunk);
+                    final chunk = Uint8List.sublistView(data, offset, end);
                     final redirect = first ? '>' : '>>';
-                    await _runShizukuCmd("printf '%s' '$b64' | base64 -d $redirect '$dstEsc'");
+                    await _runShizukuCmd("cat $redirect '$dstEsc'", stdinBytes: chunk);
                     first = false;
                     offset = end;
                   }

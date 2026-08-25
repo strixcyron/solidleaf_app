@@ -30,9 +30,18 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "executeShellCommand" -> {
-                    val command = call.arguments as? String ?: ""
+                    val args = call.arguments
+                    val command: String
+                    val stdinBytes: ByteArray?
+                    if (args is Map<*, *>) {
+                        command = args["command"] as? String ?: ""
+                        stdinBytes = args["stdin"] as? ByteArray
+                    } else {
+                        command = args as? String ?: ""
+                        stdinBytes = null
+                    }
                     try {
-                        val res = runShellCommand(command)
+                        val res = runShellCommand(command, stdinBytes)
                         val exitCode = (res["exitCode"] as? Int) ?: (res["exitCode"]?.toString()?.toIntOrNull() ?: -1)
                         if (exitCode != 0) {
                             val stderr = (res["stderr"] as? String) ?: ""
@@ -100,7 +109,7 @@ class MainActivity : FlutterActivity() {
         super.onActivityResult(requestCode, resultCode, data)
     }
 
-    private fun runShellCommand(command: String): Map<String, Any?> {
+    private fun runShellCommand(command: String, stdinBytes: ByteArray? = null): Map<String, Any?> {
         try {
             // Try to use Shizuku via reflection (so compile-time dependency is not required).
             val shizukuClass = try {
@@ -120,27 +129,7 @@ class MainActivity : FlutterActivity() {
                     if (perm == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                         val newProcessMethod = shizukuClass.getMethod("newProcess", Array<String>::class.java, java.io.File::class.java, java.io.File::class.java)
                         val process = newProcessMethod.invoke(null, arrayOf("sh", "-c", command), null, null) as Process
-
-                        val stdout = StringBuilder()
-                        val stderr = StringBuilder()
-
-                        val outReader = BufferedReader(InputStreamReader(process.inputStream))
-                        var line: String?
-                        while (outReader.readLine().also { line = it } != null) {
-                            stdout.append(line).append("\n")
-                        }
-
-                        val errReader = BufferedReader(InputStreamReader(process.errorStream))
-                        while (errReader.readLine().also { line = it } != null) {
-                            stderr.append(line).append("\n")
-                        }
-
-                        val exitCode = process.waitFor()
-                        val map: MutableMap<String, Any?> = HashMap()
-                        map["exitCode"] = exitCode
-                        map["stdout"] = stdout.toString()
-                        map["stderr"] = stderr.toString()
-                        return map
+                        return readProcessResult(process, stdinBytes)
                     }
                 } catch (_: Exception) {
                     // If reflection call fails, fall through to normal exec fallback below.
@@ -149,26 +138,7 @@ class MainActivity : FlutterActivity() {
 
             // Fallback to normal process execution
             val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
-            val stdout = StringBuilder()
-            val stderr = StringBuilder()
-
-            val outReader = BufferedReader(InputStreamReader(process.inputStream))
-            var line: String?
-            while (outReader.readLine().also { line = it } != null) {
-                stdout.append(line).append("\n")
-            }
-
-            val errReader = BufferedReader(InputStreamReader(process.errorStream))
-            while (errReader.readLine().also { line = it } != null) {
-                stderr.append(line).append("\n")
-            }
-
-            val exitCode = process.waitFor()
-            val map: MutableMap<String, Any?> = HashMap()
-            map["exitCode"] = exitCode
-            map["stdout"] = stdout.toString()
-            map["stderr"] = stderr.toString()
-            return map
+            return readProcessResult(process, stdinBytes)
         } catch (ex: Exception) {
             val map: MutableMap<String, Any?> = HashMap()
             map["exitCode"] = -1
@@ -176,5 +146,49 @@ class MainActivity : FlutterActivity() {
             map["stderr"] = ex.message ?: "Ошибка выполнения shell-команды"
             return map
         }
+    }
+
+    /**
+     * Writes optional stdin bytes on a background thread (to avoid pipe deadlocks with
+     * large payloads) while concurrently draining stdout/stderr, then waits for exit.
+     */
+    private fun readProcessResult(process: Process, stdinBytes: ByteArray?): Map<String, Any?> {
+        val writerThread = Thread {
+            try {
+                if (stdinBytes != null && stdinBytes.isNotEmpty()) {
+                    process.outputStream.write(stdinBytes)
+                }
+            } catch (_: Exception) {
+                // Ignore broken pipe if the process already exited/failed.
+            } finally {
+                try {
+                    process.outputStream.close()
+                } catch (_: Exception) {
+                }
+            }
+        }
+        writerThread.start()
+
+        val stdout = StringBuilder()
+        val stderr = StringBuilder()
+
+        val outReader = BufferedReader(InputStreamReader(process.inputStream))
+        var line: String?
+        while (outReader.readLine().also { line = it } != null) {
+            stdout.append(line).append("\n")
+        }
+
+        val errReader = BufferedReader(InputStreamReader(process.errorStream))
+        while (errReader.readLine().also { line = it } != null) {
+            stderr.append(line).append("\n")
+        }
+
+        writerThread.join()
+        val exitCode = process.waitFor()
+        val map: MutableMap<String, Any?> = HashMap()
+        map["exitCode"] = exitCode
+        map["stdout"] = stdout.toString()
+        map["stderr"] = stderr.toString()
+        return map
     }
 }
