@@ -9,12 +9,12 @@ android {
     // Force compileSdk to 36 to satisfy some plugins (flutter_plugin_android_lifecycle, file_picker, etc.)
     compileSdk = 36
     ndkVersion = flutter.ndkVersion
-
+                                                                
     // AIDL is disabled by default since AGP 8.0; required for the Shizuku UserService interface.
     buildFeatures {
         aidl = true
     }
-
+                                           
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -37,6 +37,10 @@ android {
 
     buildTypes {
         release {
+            // Temporarily disable R8/resource shrinking to avoid release-only Shizuku issues
+            // while validating the app in the current environment.
+            isMinifyEnabled = false
+            isShrinkResources = false
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
