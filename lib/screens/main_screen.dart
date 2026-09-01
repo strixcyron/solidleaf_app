@@ -231,55 +231,358 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  /// Compact banner showing the current Telegram account state ("Премиум
-  /// доступ" / "Обычный доступ") plus a "Выйти" button. Since the launcher
-  /// only reaches [MainScreen] after a successful login (see [AuthGate]),
-  /// this is always shown here — it doubles as a reminder of *why* the
-  /// texture card may be locked (see [_showPremiumLockDialog]) and as the
-  /// only way to end the session.
-  Widget _buildAccountStatusBanner(LauncherController controller) {
-    final isPremium = controller.isPremium;
-    // Gold marks premium (matches _buildPremiumLockBadge's accent color so
-    // the two states read as "the same concept"); grey marks a regular,
-    // logged-in-but-not-subscribed account.
-    final color = isPremium ? const Color(0xFFC9A227) : Colors.grey.shade500;
-    final icon = isPremium
-        ? Icons.workspace_premium_rounded
-        : Icons.person_rounded;
-    final label = isPremium ? 'Премиум доступ' : 'Обычный доступ';
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: color.withValues(alpha: 0.5), width: 1),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: color, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
+  Future<void> _showChangelogDialog(LauncherController controller) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(context).cardColor,
+        title: Text(
+          'Что нового',
+          style: TextStyle(
+            color: Theme.of(context).textTheme.bodyMedium?.color,
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        content: SizedBox(
+          width: 420,
+          child: SingleChildScrollView(
             child: Text(
-              label,
+              controller.changelog.isEmpty
+                  ? 'Список изменений пока недоступен.'
+                  : controller.changelog,
               style: TextStyle(
-                color: color,
-                fontWeight: FontWeight.w700,
+                color: Theme.of(context).textTheme.bodySmall?.color,
                 fontSize: 13,
+                height: 1.45,
               ),
             ),
           ),
-          TextButton.icon(
-            onPressed: () => _handleLogout(controller),
-            icon: const Icon(Icons.logout_rounded, size: 16),
-            label: const Text('Выйти'),
-            style: TextButton.styleFrom(
-              foregroundColor: Theme.of(context).textTheme.bodySmall?.color,
-            ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Закрыть'),
           ),
         ],
       ),
     );
+  }
+
+  String _primaryActionLabel(LauncherController controller) {
+    if (controller.isDownloading) {
+      final pct = (controller.downloadProgress * 100).toStringAsFixed(0);
+      return 'Загрузка $pct%';
+    }
+    if (controller.hasUpdate || controller.hasArtUpdate) {
+      return 'Обновить';
+    }
+    if (controller.currentVersion == 'v0.0.0') {
+      return 'Установить';
+    }
+    return 'Установлено';
+  }
+
+  bool _primaryActionEnabled(LauncherController controller) {
+    if (controller.isDownloading) return false;
+    if (controller.hasUpdate ||
+        controller.hasArtUpdate ||
+        controller.currentVersion == 'v0.0.0') {
+      return true;
+    }
+    return false;
+  }
+
+  Widget _buildHeroSection(
+    LauncherController controller, {
+    bool showSocialInCorners = false,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildCoverArt(
+          controller,
+          height: 200,
+          showSocialInCorners: showSocialInCorners,
+        ),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(
+              flex: 2,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Theme.of(context).colorScheme.primary,
+                  disabledBackgroundColor:
+                      const Color(0xFF2E7D32).withValues(alpha: 0.35),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onPressed: _primaryActionEnabled(controller)
+                    ? () => _showInstallChoiceDialog(controller)
+                    : null,
+                icon: Icon(
+                  controller.isDownloading
+                      ? Icons.downloading_rounded
+                      : controller.hasUpdate || controller.hasArtUpdate
+                          ? Icons.system_update_alt_rounded
+                          : Icons.download_rounded,
+                  color: Colors.white,
+                ),
+                label: Text(
+                  _primaryActionLabel(controller),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            OutlinedButton(
+              onPressed: () => _showChangelogDialog(controller),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 16,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text('Что нового?'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSettingsCard(LauncherController controller) {
+    final isPremium = controller.isPremium;
+    final accountColor =
+        isPremium ? const Color(0xFFC9A227) : Colors.grey.shade500;
+    final accountIcon = isPremium
+        ? Icons.workspace_premium_rounded
+        : Icons.person_rounded;
+    final accountLabel =
+        isPremium ? 'Премиум доступ' : 'Обычный доступ';
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Theme.of(context).dividerColor.withValues(alpha: 0.9),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(accountIcon, color: accountColor, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  accountLabel,
+                  style: TextStyle(
+                    color: accountColor,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () => _handleLogout(controller),
+                icon: const Icon(Icons.logout_rounded, size: 16),
+                label: const Text('Выйти'),
+                style: TextButton.styleFrom(
+                  foregroundColor:
+                      Theme.of(context).textTheme.bodySmall?.color,
+                ),
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Divider(
+              height: 1,
+              color: Theme.of(context).dividerColor,
+            ),
+          ),
+          Row(
+            children: [
+              Icon(
+                Icons.folder_outlined,
+                size: 18,
+                color: Theme.of(context).textTheme.bodySmall?.color,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  controller.installPath,
+                  style: TextStyle(
+                    color: Theme.of(context).textTheme.bodySmall?.color,
+                    fontFamily: 'Consolas',
+                    fontSize: 12,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              IconButton(
+                onPressed: controller.selectInstallPath,
+                icon: Icon(
+                  Icons.folder_open_rounded,
+                  color: Theme.of(context).textTheme.bodySmall?.color,
+                ),
+                tooltip: 'Выбрать папку',
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Divider(
+              height: 1,
+              color: Theme.of(context).dividerColor,
+            ),
+          ),
+          Text(
+            controller.statusText,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: Theme.of(context).textTheme.bodyMedium?.color,
+            ),
+          ),
+          if (controller.isDownloading) ...[
+            const SizedBox(height: 10),
+            LinearProgressIndicator(
+              value: controller.downloadProgress == 0
+                  ? null
+                  : controller.downloadProgress,
+              minHeight: 6,
+              backgroundColor: Theme.of(context).dividerColor,
+              color: Theme.of(context).colorScheme.primary,
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showRemoveBackupDialog(LauncherController controller) async {
+    final choice = await showDialog<String?>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(context).cardColor,
+        title: Text(
+          'Удалить/восстановить',
+          style: TextStyle(
+            color: Theme.of(context).textTheme.bodyMedium?.color,
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Выберите, что вы хотите удалить из установки:',
+              style: TextStyle(
+                color: Theme.of(context).textTheme.bodyMedium?.color,
+              ),
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop('text'),
+              child: const Text('Удалить русификатор текста'),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop('art'),
+              child: const Text('Удалить русификатор текстур'),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.redAccent,
+              ),
+              onPressed: () => Navigator.of(ctx).pop('all'),
+              child: const Text(
+                'Удалить всё',
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(null),
+            child: const Text('Отмена'),
+          ),
+        ],
+      ),
+    );
+
+    if (!mounted) return;
+    if (choice == null) return;
+
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (c2) => AlertDialog(
+        backgroundColor: Theme.of(context).cardColor,
+        title: Text(
+          'Подтвердите действие',
+          style: TextStyle(
+            color: Theme.of(context).textTheme.bodyMedium?.color,
+          ),
+        ),
+        content: Text(
+          'Вы уверены, что хотите выполнить действие: ${choice == 'all'
+              ? 'Удалить всё'
+              : choice == 'art'
+                  ? 'Удалить текстуры'
+                  : 'Удалить текст'}?',
+          style: TextStyle(
+            color: Theme.of(context).textTheme.bodySmall?.color,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(c2).pop(false),
+            child: const Text('Отмена'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(c2).pop(true),
+            child: const Text('Выполнить'),
+          ),
+        ],
+      ),
+    );
+
+    if (!mounted) return;
+    if (confirmed != true) return;
+
+    try {
+      await controller.restoreBackupKind(choice);
+      if (!mounted || messenger == null) return;
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Операция удаления/восстановления завершена'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted || messenger == null) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text('Ошибка: ${e.toString()}')),
+      );
+    }
   }
 
   /// Confirms, then clears the stored Telegram JWT and sends the user back
@@ -289,10 +592,18 @@ class _MainScreenState extends State<MainScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1B1826),
-        title: const Text('Выйти из аккаунта?'),
-        content: const Text(
+        backgroundColor: Theme.of(context).cardColor,
+        title: Text(
+          'Выйти из аккаунта?',
+          style: TextStyle(
+            color: Theme.of(context).textTheme.bodyMedium?.color,
+          ),
+        ),
+        content: Text(
           'Понадобится снова войти через Telegram, чтобы продолжить пользоваться лаунчером.',
+          style: TextStyle(
+            color: Theme.of(context).textTheme.bodySmall?.color,
+          ),
         ),
         actions: [
           TextButton(
@@ -432,8 +743,8 @@ class _MainScreenState extends State<MainScreen> {
               Text(
                 'Библиотека',
                 style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
                   color: Theme.of(context).textTheme.bodyMedium?.color,
                 ),
               ),
@@ -467,59 +778,15 @@ class _MainScreenState extends State<MainScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _buildCoverArt(controller, height: 190),
-                      const SizedBox(height: 12),
-                      _buildAccountStatusBanner(controller),
-                      const SizedBox(height: 22),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 12,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).cardColor,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: Theme.of(context).colorScheme.primary
-                                .withValues(alpha: 0.4),
-                            width: 1,
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                controller.installPath,
-                                style: TextStyle(
-                                  color: Theme.of(context)
-                                      .textTheme
-                                      .bodySmall
-                                      ?.color,
-                                  fontFamily: 'Consolas',
-                                  fontSize: 13,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            IconButton(
-                              onPressed: controller.selectInstallPath,
-                              icon: Icon(
-                                Icons.folder_open_rounded,
-                                color: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
-                                    ?.color,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                      _buildHeroSection(controller),
                       const SizedBox(height: 18),
+                      _buildSettingsCard(controller),
+                      const SizedBox(height: 20),
                       Text(
                         'Компоненты',
                         style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
                           color: Theme.of(context).textTheme.bodyMedium?.color,
                         ),
                       ),
@@ -529,248 +796,35 @@ class _MainScreenState extends State<MainScreen> {
                         title: 'Текстовая локализация',
                         subtitle: 'Перевод сюжета и внутриигровых меню',
                         trailing: _buildVersionBadge(controller),
+                        showDownloadProgress: controller.isDownloading,
+                        downloadProgress: controller.downloadProgress,
                       ),
                       const SizedBox(height: 10),
                       _buildComponentTile(
                         icon: Icons.image_rounded,
                         title: 'Графика и текстуры',
                         subtitle: 'Локализация интерфейса и графических файлов',
-                        // Locked (dimmed + gold "Недоступно" badge) until the
-                        // user has active Telegram-channel premium access.
                         trailing: controller.isPremium
                             ? _buildArtVersionBadge(controller)
                             : _buildPremiumLockBadge(),
                         dimmed: !controller.isPremium,
+                        premiumLocked: !controller.isPremium,
                         onTap: controller.isPremium
                             ? null
                             : () => _showPremiumLockDialog(controller),
                       ),
-                      const SizedBox(height: 18),
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).cardColor,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: Theme.of(context).dividerColor,
-                            width: 1,
-                          ),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Статус: ${controller.statusText}',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                color: Theme.of(context)
-                                    .textTheme
-                                    .bodyMedium
-                                    ?.color,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            if (controller.isDownloading)
-                              LinearProgressIndicator(
-                                value: controller.downloadProgress == 0
-                                    ? null
-                                    : controller.downloadProgress,
-                                minHeight: 8,
-                                backgroundColor: Theme.of(context).dividerColor,
-                                color: Theme.of(context).colorScheme.primary,
-                              ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      _buildUpdateInfoPanel(controller, height: 130),
                       const SizedBox(height: 16),
                       Align(
-                        alignment: Alignment.bottomRight,
-                        child: Wrap(
-                          spacing: 12,
-                          runSpacing: 8,
-                          alignment: WrapAlignment.end,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            TextButton(
-                              onPressed: () async {
-                                final choice = await showDialog<String?>(
-                                  context: context,
-                                  builder: (ctx) => AlertDialog(
-                                    backgroundColor: Theme.of(context)
-                                        .cardColor,
-                                    title: Text(
-                                      'Удалить/восстановить',
-                                      style: TextStyle(
-                                        color: Theme.of(context)
-                                            .textTheme
-                                            .bodyMedium
-                                            ?.color,
-                                      ),
-                                    ),
-                                    content: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Text(
-                                          'Выберите, что вы хотите удалить из установки:',
-                                          style: TextStyle(
-                                            color: Theme.of(context)
-                                                .textTheme
-                                                .bodyMedium
-                                                ?.color,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 12),
-                                        ElevatedButton(
-                                          onPressed: () =>
-                                              Navigator.of(ctx).pop('text'),
-                                          child: const Text(
-                                            'Удалить русификатор текста',
-                                          ),
-                                        ),
-                                        const SizedBox(height: 8),
-                                        ElevatedButton(
-                                          onPressed: () =>
-                                              Navigator.of(ctx).pop('art'),
-                                          child: const Text(
-                                            'Удалить русификатор текстур',
-                                          ),
-                                        ),
-                                        const SizedBox(height: 8),
-                                        ElevatedButton(
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: Colors.redAccent,
-                                          ),
-                                          onPressed: () =>
-                                              Navigator.of(ctx).pop('all'),
-                                          child: const Text(
-                                            'Удалить всё',
-                                            style: TextStyle(
-                                              color: Colors.white,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () =>
-                                            Navigator.of(ctx).pop(null),
-                                        child: const Text('Отмена'),
-                                      ),
-                                    ],
-                                  ),
-                                );
-
-                                if (!mounted) return;
-                                if (choice == null) return;
-
-                                final localContext = context;
-                                final messenger = ScaffoldMessenger.maybeOf(
-                                  localContext,
-                                );
-                                final confirmed = await showDialog<bool>(
-                                  context: localContext,
-                                  builder: (c2) => AlertDialog(
-                                    backgroundColor: Theme.of(context)
-                                        .cardColor,
-                                    title: Text(
-                                      'Подтвердите действие',
-                                      style: TextStyle(
-                                        color: Theme.of(context)
-                                            .textTheme
-                                            .bodyMedium
-                                            ?.color,
-                                      ),
-                                    ),
-                                    content: Text(
-                                      'Вы уверены, что хотите выполнить действие: ${choice == 'all'
-                                          ? 'Удалить всё'
-                                          : choice == 'art'
-                                          ? 'Удалить текстуры'
-                                          : 'Удалить текст'}?',
-                                      style: TextStyle(
-                                        color: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall
-                                            ?.color,
-                                      ),
-                                    ),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () =>
-                                            Navigator.of(c2).pop(false),
-                                        child: const Text('Отмена'),
-                                      ),
-                                      ElevatedButton(
-                                        onPressed: () =>
-                                            Navigator.of(c2).pop(true),
-                                        child: const Text('Выполнить'),
-                                      ),
-                                    ],
-                                  ),
-                                );
-
-                                if (!mounted) return;
-                                if (confirmed != true) return;
-
-                                try {
-                                  await controller.restoreBackupKind(choice);
-                                  if (!mounted || messenger == null) return;
-                                  messenger.showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'Операция удаления/восстановления завершена',
-                                      ),
-                                    ),
-                                  );
-                                } catch (e) {
-                                  if (!mounted || messenger == null) return;
-                                  messenger.showSnackBar(
-                                    SnackBar(
-                                      content: Text('Ошибка: ${e.toString()}'),
-                                    ),
-                                  );
-                                }
-                              },
-                              child: Text(
-                                'Удалить',
-                                style: TextStyle(
-                                  color: Theme.of(context)
-                                      .textTheme
-                                      .bodySmall
-                                      ?.color,
-                                ),
-                              ),
-                            ),
-                            ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Theme.of(context)
-                                    .colorScheme
-                                    .primary,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 30,
-                                  vertical: 18,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                              onPressed: controller.isDownloading
-                                  ? null
-                                  : () => _showInstallChoiceDialog(controller),
-                              child: Text(
-                                controller.hasUpdate
-                                    ? 'Обновить'
-                                    : 'Установить',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                          ],
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          onPressed: () =>
+                              _showRemoveBackupDialog(controller),
+                          icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                          label: const Text('Удалить русификатор'),
+                          style: TextButton.styleFrom(
+                            foregroundColor:
+                                Theme.of(context).textTheme.bodySmall?.color,
+                          ),
                         ),
                       ),
                     ],
@@ -820,236 +874,57 @@ class _MainScreenState extends State<MainScreen> {
               ],
             ),
             const SizedBox(height: 16),
-            _buildCoverArt(controller, height: 170, showSocialInCorners: true),
-            const SizedBox(height: 12),
-            _buildAccountStatusBanner(controller),
+            _buildHeroSection(controller, showSocialInCorners: true),
             const SizedBox(height: 16),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Theme.of(context).cardColor,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: Theme.of(context).colorScheme.primary
-                      .withValues(alpha: 0.4),
-                  width: 1,
+            _buildSettingsCard(controller),
+            if (!controller.isShizukuActive)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Text(
+                  'Shizuku не активен — установка на Android невозможна',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.error,
+                    fontSize: 12,
+                  ),
                 ),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    controller.isShizukuActive
-                        ? 'Статус: Shizuku активен'
-                        : 'Статус: Shizuku не активен',
-                    style: TextStyle(
-                      color: Theme.of(context).textTheme.bodySmall?.color,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  if (controller.isDownloading)
-                    LinearProgressIndicator(
-                      value: controller.downloadProgress == 0
-                          ? null
-                          : controller.downloadProgress,
-                      minHeight: 12,
-                      backgroundColor: Theme.of(context).dividerColor,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
-                  const SizedBox(height: 12),
-                  Text(
-                    controller.statusText,
-                    style: TextStyle(
-                      color: Theme.of(context).textTheme.bodyMedium?.color,
-                    ),
-                  ),
-                ],
+            const SizedBox(height: 16),
+            Text(
+              'Компоненты',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: Theme.of(context).textTheme.bodyMedium?.color,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             _buildComponentTile(
               icon: Icons.translate_rounded,
               title: 'Текстовая локализация',
               subtitle: 'Перевод сюжета и внутриигровых меню',
               trailing: _buildVersionBadge(controller),
+              showDownloadProgress: controller.isDownloading,
+              downloadProgress: controller.downloadProgress,
             ),
             const SizedBox(height: 10),
             _buildComponentTile(
               icon: Icons.image_rounded,
               title: 'Графика и текстуры',
               subtitle: 'Локализация интерфейса и графических файлов',
-              // Locked (dimmed + gold "Недоступно" badge) until the user
-              // has active Telegram-channel premium access.
               trailing: controller.isPremium
                   ? _buildArtVersionBadge(controller)
                   : _buildPremiumLockBadge(),
               dimmed: !controller.isPremium,
+              premiumLocked: !controller.isPremium,
               onTap: controller.isPremium
                   ? null
                   : () => _showPremiumLockDialog(controller),
             ),
-            const SizedBox(height: 18),
-            _buildUpdateInfoPanel(controller, height: 140),
             const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: TextButton(
-                    onPressed: () async {
-                      final choice = await showDialog<String?>(
-                        context: context,
-                        builder: (ctx) => AlertDialog(
-                          backgroundColor: Theme.of(context).cardColor,
-                          title: Text(
-                            'Удалить/восстановить',
-                            style: TextStyle(
-                              color: Theme.of(context)
-                                  .textTheme
-                                  .bodyMedium
-                                  ?.color,
-                            ),
-                          ),
-                          content: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                'Выберите, что вы хотите удалить из установки:',
-                                style: TextStyle(
-                                  color: Theme.of(context)
-                                      .textTheme
-                                      .bodyMedium
-                                      ?.color,
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              ElevatedButton(
-                                onPressed: () => Navigator.of(ctx).pop('text'),
-                                child: const Text('Удалить русификатор текста'),
-                              ),
-                              const SizedBox(height: 8),
-                              ElevatedButton(
-                                onPressed: () => Navigator.of(ctx).pop('art'),
-                                child: const Text(
-                                  'Удалить русификатор текстур',
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              ElevatedButton(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.redAccent,
-                                ),
-                                onPressed: () => Navigator.of(ctx).pop('all'),
-                                child: const Text(
-                                  'Удалить всё',
-                                  style: TextStyle(color: Colors.white),
-                                ),
-                              ),
-                            ],
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.of(ctx).pop(null),
-                              child: const Text('Отмена'),
-                            ),
-                          ],
-                        ),
-                      );
-
-                      if (!mounted) return;
-                      if (choice == null) return;
-
-                      final messenger = ScaffoldMessenger.maybeOf(context);
-                      final confirmed = await showDialog<bool>(
-                        context: context,
-                        builder: (c2) => AlertDialog(
-                          backgroundColor: Theme.of(context).cardColor,
-                          title: Text(
-                            'Подтвердите действие',
-                            style: TextStyle(
-                              color: Theme.of(context)
-                                  .textTheme
-                                  .bodyMedium
-                                  ?.color,
-                            ),
-                          ),
-                          content: Text(
-                            'Вы уверены, что хотите выполнить действие: ${choice == 'all'
-                                ? 'Удалить всё'
-                                : choice == 'art'
-                                ? 'Удалить текстуры'
-                                : 'Удалить текст'}?',
-                            style: TextStyle(
-                              color: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.color,
-                            ),
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.of(c2).pop(false),
-                              child: const Text('Отмена'),
-                            ),
-                            ElevatedButton(
-                              onPressed: () => Navigator.of(c2).pop(true),
-                              child: const Text('Выполнить'),
-                            ),
-                          ],
-                        ),
-                      );
-
-                      if (!mounted) return;
-                      if (confirmed != true) return;
-
-                      try {
-                        await controller.restoreBackupKind(choice);
-                        if (!mounted || messenger == null) return;
-                        messenger.showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Операция удаления/восстановления завершена',
-                            ),
-                          ),
-                        );
-                      } catch (e) {
-                        if (!mounted || messenger == null) return;
-                        messenger.showSnackBar(
-                          SnackBar(content: Text('Ошибка: ${e.toString()}')),
-                        );
-                      }
-                    },
-                    child: Text(
-                      'Удалить',
-                      style: TextStyle(
-                        color: Theme.of(context).textTheme.bodySmall?.color,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Theme.of(context).colorScheme.primary,
-                      padding: const EdgeInsets.symmetric(vertical: 18),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                    onPressed: controller.isDownloading
-                        ? null
-                        : () => _showInstallChoiceDialog(controller),
-                    child: Text(
-                      controller.hasUpdate ? 'Обновить' : 'Установить',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
+            TextButton.icon(
+              onPressed: () => _showRemoveBackupDialog(controller),
+              icon: const Icon(Icons.delete_outline_rounded, size: 18),
+              label: const Text('Удалить русификатор'),
             ),
             const SizedBox(height: 10),
           ],
@@ -1093,77 +968,43 @@ class _MainScreenState extends State<MainScreen> {
                   end: Alignment.bottomCenter,
                   colors: [
                     Colors.transparent,
-                    Colors.black.withValues(alpha: 0.78),
+                    Colors.black.withValues(alpha: 0.85),
                   ],
-                  stops: const [0.35, 1.0],
+                  stops: const [0.45, 1.0],
                 ),
               ),
             ),
             Positioned(
               left: 20,
               right: 20,
-              bottom: 16,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
+              bottom: 18,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Expanded(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Reverse: 1999',
-                          style: TextStyle(
-                            fontSize: 28,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                        SizedBox(height: 2),
-                        Text(
-                          'Полная русификация (текст, интерфейс и графика)',
-                          style: TextStyle(color: Colors.white70, fontSize: 13),
+                  Text(
+                    'Reverse: 1999',
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                      shadows: [
+                        Shadow(
+                          color: Colors.black.withValues(alpha: 0.5),
+                          blurRadius: 8,
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  (controller.hasUpdate || controller.hasArtUpdate)
-                      ? Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFFFA726)
-                                .withValues(alpha: 0.16),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: const Color(0xFFFFA726),
-                              width: 1,
-                            ),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.update_rounded,
-                                color: Color(0xFFFFA726),
-                                size: 14,
-                              ),
-                              SizedBox(width: 6),
-                              Text(
-                                'Доступно обновление',
-                                style: TextStyle(
-                                  color: Color(0xFFFFA726),
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            ],
-                          ),
-                        )
-                      : _buildVersionBadge(controller),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Полная русификация (текст, интерфейс и графика)',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.85),
+                      fontSize: 12,
+                      height: 1.35,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -1305,49 +1146,6 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  Widget _buildUpdateInfoPanel(
-    LauncherController controller, {
-    double height = 130,
-  }) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Theme.of(context).dividerColor, width: 1),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Информация об обновлении',
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-              fontSize: 12,
-              color: Theme.of(context).textTheme.bodyMedium?.color,
-            ),
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            height: height,
-            child: SingleChildScrollView(
-              child: Text(
-                controller.changelog.isEmpty
-                    ? 'Список изменений пока недоступен.'
-                    : controller.changelog,
-                style: TextStyle(
-                  color: Theme.of(context).textTheme.bodySmall?.color,
-                  fontSize: 12,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildVersionBadge(LauncherController controller) {
     final notInstalled = controller.currentVersion == 'v0.0.0';
     final Color color;
@@ -1454,7 +1252,7 @@ class _MainScreenState extends State<MainScreen> {
           Icon(Icons.lock_rounded, color: color, size: 14),
           SizedBox(width: 6),
           Text(
-            'Недоступно',
+            'Только Premium',
             style: TextStyle(
               color: color,
               fontWeight: FontWeight.w700,
@@ -1474,17 +1272,25 @@ class _MainScreenState extends State<MainScreen> {
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1B1826),
-        title: const Row(
+        backgroundColor: Theme.of(context).cardColor,
+        title: Row(
           children: [
-            Icon(Icons.lock_rounded, color: Color(0xFFC9A227)),
-            SizedBox(width: 8),
-            Text('Доступ ограничен'),
+            const Icon(Icons.lock_rounded, color: Color(0xFFC9A227)),
+            const SizedBox(width: 8),
+            Text(
+              'Доступ ограничен',
+              style: TextStyle(
+                color: Theme.of(context).textTheme.bodyMedium?.color,
+              ),
+            ),
           ],
         ),
-        content: const Text(
+        content: Text(
           'Графическая локализация доступна только участникам нашего приватного премиум-канала. '
           'Присоединитесь к каналу, а затем повторно войдите через Telegram, чтобы разблокировать установку текстур.',
+          style: TextStyle(
+            color: Theme.of(context).textTheme.bodySmall?.color,
+          ),
         ),
         actions: [
           TextButton(
@@ -1561,47 +1367,69 @@ class _MainScreenState extends State<MainScreen> {
     required String subtitle,
     Widget? trailing,
     bool dimmed = false,
+    bool premiumLocked = false,
+    bool showDownloadProgress = false,
+    double downloadProgress = 0,
     VoidCallback? onTap,
   }) {
+    final borderColor = premiumLocked
+        ? const Color(0xFFC9A227).withValues(alpha: 0.45)
+        : Theme.of(context).dividerColor;
+
     final content = Opacity(
-      // Dimming (opacity 0.55) is the visual cue for a component the user
-      // can't access yet — currently used for the locked "Графика и
-      // текстуры" card when the user has no active premium (Telegram) access.
-      opacity: dimmed ? 0.55 : 1.0,
+      opacity: dimmed ? 0.72 : 1.0,
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Theme.of(context).dividerColor, width: 1),
+          border: Border.all(color: borderColor, width: 1),
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Icon(icon, color: Theme.of(context).colorScheme.primary),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context).textTheme.bodyMedium?.color,
-                    ),
+            Row(
+              children: [
+                Icon(icon, color: Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color:
+                              Theme.of(context).textTheme.bodyMedium?.color,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          color: Theme.of(context).textTheme.bodySmall?.color,
+                          fontSize: 12,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      color: Theme.of(context).textTheme.bodySmall?.color,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
+                ),
+                if (trailing != null) trailing,
+              ],
             ),
-            if (trailing != null) trailing,
+            if (showDownloadProgress) ...[
+              const SizedBox(height: 12),
+              LinearProgressIndicator(
+                value: downloadProgress == 0 ? null : downloadProgress,
+                minHeight: 5,
+                backgroundColor: Theme.of(context).dividerColor,
+                color: Theme.of(context).colorScheme.primary,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ],
           ],
         ),
       ),

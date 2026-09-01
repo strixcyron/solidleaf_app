@@ -50,7 +50,7 @@ class LocalizationLauncher extends StatelessWidget {
         brightness: Brightness.light,
         scaffoldBackgroundColor: const Color(0xFFF4F0E6),
         cardColor: const Color(0xFFE8E2D4),
-        dividerColor: const Color(0xFFD4CCB8),
+        dividerColor: const Color(0xFFC8BFB0),
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF8C6D3B),
           primary: const Color(0xFF8C6D3B),
