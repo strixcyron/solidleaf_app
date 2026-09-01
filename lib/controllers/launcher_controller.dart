@@ -113,6 +113,37 @@ class LauncherController extends ChangeNotifier {
     return headers;
   }
 
+  /// Заголовки для скачивания файла релиза. Ассеты приватного репозитория
+  /// нужно качать через API-URL (`asset['url']`) с
+  /// `Accept: application/octet-stream` — `browser_download_url` отдаёт 404
+  /// без браузерной сессии, даже если метаданные релиза уже получены.
+  Map<String, String> _assetDownloadHeaders() {
+    if (isPremium) {
+      return {
+        'Accept': 'application/octet-stream',
+        'User-Agent': 'solidleaf-launcher-app',
+        'Authorization': 'Bearer ${GitHubConfig.premiumToken}',
+      };
+    }
+    return {
+      'Accept': '*/*',
+      'User-Agent': 'solidleaf-launcher-app',
+    };
+  }
+
+  /// Возвращает URL для скачивания ассета релиза. Для премиум (приватного)
+  /// репозитория — API-эндпоинт; для публичного — browser_download_url.
+  String? _resolveAssetDownloadUrl(Map<String, dynamic> asset) {
+    if (isPremium) {
+      final apiUrl = (asset['url'] ?? '').toString();
+      if (apiUrl.isNotEmpty) {
+        return apiUrl;
+      }
+    }
+    final browserUrl = (asset['browser_download_url'] ?? '').toString();
+    return browserUrl.isEmpty ? null : browserUrl;
+  }
+
   @override
   void dispose() {
     telegramAuth.dispose();
@@ -983,7 +1014,7 @@ class LauncherController extends ChangeNotifier {
     Map<String, dynamic> asset, {
     required String kind,
   }) async {
-    final zipUrl = asset['browser_download_url'] as String?;
+    final zipUrl = _resolveAssetDownloadUrl(asset);
     if (zipUrl == null || zipUrl.isEmpty) {
       throw DioException(
         requestOptions: RequestOptions(path: _activeReleaseApiUrl),
@@ -1005,16 +1036,19 @@ class LauncherController extends ChangeNotifier {
       final tempDir = extDir ?? await getTemporaryDirectory();
       final zipPath =
           '${tempDir.path}/reverse1999_${kind}_${DateTime.now().millisecondsSinceEpoch}.zip';
+      final assetName = (asset['name'] ?? '').toString();
+      addLog(
+        'Загрузка ${assetName.isEmpty ? kind : assetName} '
+        '(${isPremium ? "API asset URL" : "public URL"})...',
+      );
       await _dio.download(
         zipUrl,
         zipPath,
         options: Options(
-          headers: {
-            'Accept': '*/*',
-            'User-Agent': 'solidleaf-launcher-app',
-            if (isPremium) ..._releaseRequestHeaders(),
-          },
+          headers: _assetDownloadHeaders(),
           receiveTimeout: const Duration(minutes: 10),
+          followRedirects: true,
+          maxRedirects: 5,
         ),
         onReceiveProgress: (received, total) {
           if (total <= 0) {
@@ -1381,11 +1415,21 @@ class LauncherController extends ChangeNotifier {
       final ghMessage = exception.response?.data is Map
           ? (exception.response!.data as Map)['message']?.toString()
           : null;
-      message = isPremium
-          ? 'Премиум-релиз в $_activeReleaseRepoLabel недоступен (404). '
-              'GitHub: "${ghMessage ?? "Not Found"}", auth=$sentAuth. '
-              '[${GitHubConfig.debugState}]'
-          : 'Релиз не найден в репозитории $_activeReleaseRepoLabel.';
+      final path = exception.requestOptions.uri.path;
+      final isAssetDownload = path.contains('/releases/assets/') ||
+          path.contains('/releases/download/');
+      if (isPremium && isAssetDownload) {
+        message =
+            'Не удалось скачать файл из $_activeReleaseRepoLabel (404). '
+            'GitHub: "${ghMessage ?? "Not Found"}", auth=$sentAuth. '
+            '[${GitHubConfig.debugState}]';
+      } else if (isPremium) {
+        message = 'Премиум-релиз в $_activeReleaseRepoLabel недоступен (404). '
+            'GitHub: "${ghMessage ?? "Not Found"}", auth=$sentAuth. '
+            '[${GitHubConfig.debugState}]';
+      } else {
+        message = 'Релиз не найден в репозитории $_activeReleaseRepoLabel.';
+      }
     } else if (exception.error != null) {
       message = exception.error.toString();
     }
