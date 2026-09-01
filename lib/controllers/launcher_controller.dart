@@ -11,6 +11,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_constants.dart';
+import '../config/github_config.dart';
 import '../telegram_auth_service.dart';
 
 class LauncherController extends ChangeNotifier {
@@ -42,6 +43,7 @@ class LauncherController extends ChangeNotifier {
 
   Map<String, dynamic>? _cachedRelease;
   DateTime? _cachedReleaseAt;
+  bool? _cachedReleaseIsPremium;
   static const _releaseCacheTtl = Duration(seconds: 45);
 
   // --- Telegram account tiers (login-gated launcher access) ----------------
@@ -60,8 +62,44 @@ class LauncherController extends ChangeNotifier {
   /// [TelegramAuthService.downloadPremiumTextures]) so the UI badge/lock
   /// stays in sync with the actual account tier.
   Future<void> refreshPremiumStatus() async {
+    final wasPremium = isPremium;
     isPremium = await telegramAuth.hasPremiumAccess();
+    if (wasPremium != isPremium) {
+      _invalidateReleaseCache();
+    }
     notifyListeners();
+  }
+
+  void _invalidateReleaseCache() {
+    _cachedRelease = null;
+    _cachedReleaseAt = null;
+    _cachedReleaseIsPremium = null;
+  }
+
+  String get _activeReleaseApiUrl =>
+      isPremium ? githubPremiumLatestReleaseUrl : githubFreeLatestReleaseUrl;
+
+  String get _activeReleaseRepoLabel =>
+      isPremium ? 'FrauxHD/PREMIUM' : 'strixcyron/SOLIDLEAF-TEAM';
+
+  Map<String, String> _releaseRequestHeaders() {
+    final headers = <String, String>{
+      'Accept': 'application/vnd.github.v3+json',
+      'User-Agent': 'solidleaf-launcher-app',
+    };
+
+    if (isPremium) {
+      final token = GitHubConfig.premiumToken;
+      if (token.isEmpty) {
+        throw Exception(
+          'GITHUB_TOKEN не настроен. Соберите приложение с '
+          '--dart-define=GITHUB_TOKEN=<ваш_токен> для доступа к премиум-релизам.',
+        );
+      }
+      headers['Authorization'] = 'Bearer $token';
+    }
+
+    return headers;
   }
 
   @override
@@ -618,34 +656,42 @@ class LauncherController extends ChangeNotifier {
     if (!force &&
         _cachedRelease != null &&
         _cachedReleaseAt != null &&
+        _cachedReleaseIsPremium == isPremium &&
         DateTime.now().difference(_cachedReleaseAt!) < _releaseCacheTtl) {
       return _cachedRelease!;
     }
 
-    // Telegram JWT is not a GitHub token вЂ” sending it makes GitHub return 401.
+    // Free repo is public — no Authorization header.
+    // Premium repo is private — requires GITHUB_TOKEN (see GitHubConfig).
     final response = await _dio
         .get(
-          githubLatestReleaseUrl,
-          options: Options(
-            headers: const {
-              'Accept': 'application/vnd.github.v3+json',
-              'User-Agent': 'solidleaf-launcher-app',
-            },
-          ),
+          _activeReleaseApiUrl,
+          options: Options(headers: _releaseRequestHeaders()),
         )
         .timeout(const Duration(seconds: 15));
 
     final status = response.statusCode ?? 0;
+    if (status == 401) {
+      throw Exception(
+        'GitHub отклонил авторизацию (401). Проверьте GITHUB_TOKEN для $_activeReleaseRepoLabel.',
+      );
+    }
     if (status == 403 || status == 429) {
-      throw Exception('РџСЂРµРІС‹С€РµРЅ Р»РёРјРёС‚ Р·Р°РїСЂРѕСЃРѕРІ Рє GitHub. РџРѕРїСЂРѕР±СѓР№С‚Рµ РїРѕР·Р¶Рµ.');
+      throw Exception('Превышен лимит запросов к GitHub. Попробуйте позже.');
+    }
+    if (status == 404) {
+      throw Exception(
+        'Релиз не найден в репозитории $_activeReleaseRepoLabel.',
+      );
     }
     if (status != 200 || response.data == null) {
-      throw Exception('РћС€РёР±РєР° СЃРµСЂРІРµСЂР° GitHub: $status');
+      throw Exception('Ошибка сервера GitHub: $status');
     }
 
     final data = Map<String, dynamic>.from(response.data as Map);
     _cachedRelease = data;
     _cachedReleaseAt = DateTime.now();
+    _cachedReleaseIsPremium = isPremium;
     return data;
   }
 
@@ -672,36 +718,53 @@ class LauncherController extends ChangeNotifier {
     return null;
   }
 
-  /// Public GitHub currently ships free text packs as
-  /// `1.5.0.19_pc_free.zip` / `1.5.0.19_android_free.zip`. Prefer `*_full.zip`
-  /// when present, then `*_free.zip`, then any non-art zip for this platform.
+  /// Free tier: `*_pc_free.zip` / `*_android_free.zip` from SOLIDLEAF-TEAM.
+  /// Premium tier: `*_pc_full.zip` / `*_android_full.zip` from FrauxHD/PREMIUM.
   Map<String, dynamic>? _pickTextAsset(List<Map<String, dynamic>> assets) {
     final platformKey = _platformAssetKey;
+    if (isPremium) {
+      return _findReleaseAsset(
+        assets,
+        (name, url) =>
+            name.contains('_${platformKey}_full.zip') ||
+            name.endsWith('_${platformKey}_full.zip'),
+      );
+    }
+
     return _findReleaseAsset(
-          assets,
-          (name, url) =>
-              name.contains('_${platformKey}_full.zip') ||
-              name.endsWith('_${platformKey}_full.zip'),
-        ) ??
-        _findReleaseAsset(
-          assets,
-          (name, url) =>
-              name.contains('_${platformKey}_free.zip') ||
-              name.endsWith('_${platformKey}_free.zip'),
-        ) ??
-        _findReleaseAsset(
-          assets,
-          (name, url) =>
-              name.contains(platformKey) &&
-              name.endsWith('.zip') &&
-              !name.contains('_art'),
-        );
+      assets,
+      (name, url) =>
+          name.contains('_${platformKey}_free.zip') ||
+          name.endsWith('_${platformKey}_free.zip'),
+    );
+  }
+
+  /// Premium art packs: `*_pc_art.zip` / `*_android_art.zip`.
+  Map<String, dynamic>? _pickArtAsset(List<Map<String, dynamic>> assets) {
+    final platformKey = _platformAssetKey;
+    return _findReleaseAsset(
+      assets,
+      (name, url) =>
+          name.contains('_${platformKey}_art.zip') ||
+          name.endsWith('_${platformKey}_art.zip'),
+    );
+  }
+
+  String _artVersionFromAsset(
+    Map<String, dynamic> asset,
+    Map<String, dynamic> release,
+  ) {
+    final name = (asset['name'] ?? '').toString();
+    final verMatch = RegExp(r'(\d+(?:\.\d+)*)').firstMatch(name);
+    if (verMatch != null) return 'v${verMatch.group(1)}';
+    return (release['tag_name'] ?? release['name'] ?? remoteArtVersion)
+        .toString();
   }
 
   Future<void> checkForUpdates() async {
     try {
       statusText = 'РџСЂРѕРІРµСЂРєР° РѕР±РЅРѕРІР»РµРЅРёР№...';
-      addLog('Р—Р°РїСЂРѕСЃ GitHub Releases...');
+      addLog('Запрос GitHub Releases ($_activeReleaseRepoLabel)...');
       final data = await _fetchLatestRelease(force: true);
       final version = (data['tag_name'] ?? data['name'] ?? 'v0.0.0').toString();
       final body = (data['body'] ?? 'Р‘РµР· СЃРїРёСЃРєР° РёР·РјРµРЅРµРЅРёР№').toString();
@@ -758,10 +821,21 @@ class LauncherController extends ChangeNotifier {
     }
 
     try {
-      addLog('РџСЂРѕРІРµСЂРєР° РІРµСЂСЃРёРё РїСЂРµРјРёСѓРј-С‚РµРєСЃС‚СѓСЂ...');
+      addLog('Проверка версии премиум-текстур ($_activeReleaseRepoLabel)...');
       final data = await _fetchLatestRelease();
-      remoteArtVersion =
-          (data['tag_name'] ?? data['name'] ?? remoteVersion).toString();
+      final assets = _releaseAssets(data);
+      final artAsset = _pickArtAsset(assets);
+
+      if (artAsset != null) {
+        remoteArtVersion = _artVersionFromAsset(artAsset, data);
+      } else {
+        remoteArtVersion =
+            (data['tag_name'] ?? data['name'] ?? remoteVersion).toString();
+        addLog(
+          'Art-архив не найден в релизе, версия взята из тега: $remoteArtVersion',
+        );
+      }
+
       hasArtUpdate = _isVersionNewer(remoteArtVersion, currentArtVersion);
       addLog(
         'Р’РµСЂСЃРёСЏ С‚РµРєСЃС‚СѓСЂ РЅР° СЃРµСЂРІРµСЂРµ: $remoteArtVersion, Р»РѕРєР°Р»СЊРЅРѕ: $currentArtVersion',
@@ -801,59 +875,14 @@ class LauncherController extends ChangeNotifier {
 
   Future<void> installArtPack() async {
     if (!isPremium) {
-      statusText = 'РўРµРєСЃС‚СѓСЂС‹ РґРѕСЃС‚СѓРїРЅС‹ С‚РѕР»СЊРєРѕ СЃ РїР»Р°С‚РЅРѕР№ РїРѕРґРїРёСЃРєРѕР№.';
+      statusText = 'Текстуры доступны только с платной подпиской.';
       addLog(statusText);
       notifyListeners();
       return;
     }
-    await _downloadAndInstallPremiumArt();
-  }
 
-  Future<void> _downloadAndInstallPremiumArt() async {
-    try {
-      isDownloading = true;
-      downloadProgress = 0;
-      statusText = 'Р—Р°РіСЂСѓР·РєР° С‚РµРєСЃС‚СѓСЂ...';
-      notifyListeners();
-
-      final file = await telegramAuth.downloadPremiumTextures(
-        onProgress: (received, total) {
-          if (total <= 0) return;
-          downloadProgress = received / total;
-          statusText =
-              'Р—Р°РіСЂСѓР·РєР° С‚РµРєСЃС‚СѓСЂ: ${(downloadProgress * 100).toStringAsFixed(0)}%';
-          notifyListeners();
-        },
-      );
-
-      addLog('РђСЂС…РёРІ С‚РµРєСЃС‚СѓСЂ Р·Р°РіСЂСѓР¶РµРЅ: ${file.path}');
-      await _extractArchive(file.path, installPath, archiveKind: 'art');
-
-      final prefs = await SharedPreferences.getInstance();
-      final installed =
-          remoteArtVersion == 'вЂ”' ? remoteVersion : remoteArtVersion;
-      await prefs.setString('installed_art_version', installed);
-      currentArtVersion = installed;
-      hasArtUpdate = false;
-
-      isDownloading = false;
-      downloadProgress = 1;
-      statusText = 'РЈСЃС‚Р°РЅРѕРІРєР° С‚РµРєСЃС‚СѓСЂ Р·Р°РІРµСЂС€РµРЅР°';
-      addLog('РЈСЃС‚Р°РЅРѕРІРєР° РіСЂР°С„РёРєРё Рё С‚РµРєСЃС‚СѓСЂ Р·Р°РІРµСЂС€РµРЅР°.');
-      notifyListeners();
-    } on TelegramAuthException catch (error) {
-      isDownloading = false;
-      await refreshPremiumStatus();
-      statusText = error.message;
-      addLog(error.message);
-      notifyListeners();
-    } catch (error) {
-      isDownloading = false;
-      final message = 'РћС€РёР±РєР° СѓСЃС‚Р°РЅРѕРІРєРё С‚РµРєСЃС‚СѓСЂ: ${error.toString()}';
-      statusText = message;
-      addLog(message);
-      notifyListeners();
-    }
+    final asset = await _getArtAsset();
+    await _downloadAndInstallReleaseAsset(asset, kind: 'art');
   }
 
   Future<void> _downloadAndInstallReleaseAsset(
@@ -863,8 +892,8 @@ class LauncherController extends ChangeNotifier {
     final zipUrl = asset['browser_download_url'] as String?;
     if (zipUrl == null || zipUrl.isEmpty) {
       throw DioException(
-        requestOptions: RequestOptions(path: githubLatestReleaseUrl),
-        error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РЅР°Р№С‚Рё zip-Р°СЂС…РёРІ РІ GitHub Releases',
+        requestOptions: RequestOptions(path: _activeReleaseApiUrl),
+        error: 'Не удалось найти zip-архив в GitHub Releases',
       );
     }
 
@@ -886,9 +915,10 @@ class LauncherController extends ChangeNotifier {
         zipUrl,
         zipPath,
         options: Options(
-          headers: const {
+          headers: {
             'Accept': '*/*',
             'User-Agent': 'solidleaf-launcher-app',
+            if (isPremium) ..._releaseRequestHeaders(),
           },
           receiveTimeout: const Duration(minutes: 10),
         ),
@@ -946,11 +976,28 @@ class LauncherController extends ChangeNotifier {
     final data = await _fetchLatestRelease();
     final asset = _pickTextAsset(_releaseAssets(data));
     if (asset == null) {
+      final suffix = isPremium ? '_full.zip' : '_free.zip';
       final names = _releaseAssets(data)
           .map((a) => (a['name'] ?? '').toString())
           .join(', ');
       throw Exception(
-        'РђСЂС…РёРІ С‚РµРєСЃС‚Р° РґР»СЏ РІР°С€РµР№ РїР»Р°С‚С„РѕСЂРјС‹ РЅРµ РЅР°Р№РґРµРЅ. Р¤Р°Р№Р»С‹ РІ СЂРµР»РёР·Рµ: ${names.isEmpty ? '(РїСѓСЃС‚Рѕ)' : names}',
+        'Архив текста (*$suffix) для вашей платформы не найден в $_activeReleaseRepoLabel. '
+        'Файлы в релизе: ${names.isEmpty ? '(пусто)' : names}',
+      );
+    }
+    return asset;
+  }
+
+  Future<Map<String, dynamic>> _getArtAsset() async {
+    final data = await _fetchLatestRelease();
+    final asset = _pickArtAsset(_releaseAssets(data));
+    if (asset == null) {
+      final names = _releaseAssets(data)
+          .map((a) => (a['name'] ?? '').toString())
+          .join(', ');
+      throw Exception(
+        'Архив текстур (*_art.zip) для вашей платформы не найден в $_activeReleaseRepoLabel. '
+        'Файлы в релизе: ${names.isEmpty ? '(пусто)' : names}',
       );
     }
     return asset;
