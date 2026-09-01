@@ -18,6 +18,10 @@ const String githubPremiumTagReleaseUrl =
     'https://api.github.com/repos/FrauxHD/PREMIUM/releases/tags/update';
 
 const String shizukuChannel = 'com.example.re_1999_solidleaf/shizuku';
+// Скачивание Shizuku (последний релиз) и официальный гайд по настройке.
+const String shizukuDownloadUrl =
+    'https://github.com/RikkaApps/Shizuku/releases/latest';
+const String shizukuGuideUrl = 'https://shizuku.rikka.app/guide/setup/';
 const String boostyUrl = 'https://boosty.to/strix.cyron/donate';
 // Public community group — joining this is enough to log in with "basic"
 // (text-only) access.

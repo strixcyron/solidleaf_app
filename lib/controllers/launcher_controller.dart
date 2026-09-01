@@ -89,6 +89,163 @@ class LauncherController extends ChangeNotifier {
       _invalidateReleaseCache();
     }
     notifyListeners();
+
+    // Подписка истекла (Premium -> Free): автоматически откатываем премиум-
+    // модификации к базовой бесплатной версии без перезапуска/перелогина.
+    if (wasPremium && !isPremium) {
+      await _handlePremiumDowngrade();
+    }
+  }
+
+  /// Автоматический откат Premium -> Free при истечении подписки.
+  ///
+  /// Возвращает к оригиналу игры все файлы, которые перезаписал премиум
+  /// (меню, интерфейс, конфиги, графика/текстуры), но оставляет базовые
+  /// free-файлы (перевод сюжета) нетронутыми. На Android используется Shizuku,
+  /// так как файлы лежат в `Android/data`.
+  Future<void> _handlePremiumDowngrade() async {
+    final backupDirPath = _backupFolderName();
+
+    // Если ничего премиумного не устанавливалось — откатывать нечего.
+    final hasBackup = Platform.isAndroid
+        ? isShizukuActive && await _safeFsExists(backupDirPath)
+        : await Directory(backupDirPath).exists();
+    if (!hasBackup && currentArtVersion == 'v0.0.0') {
+      return;
+    }
+
+    addLog('Подписка Premium истекла — выполняется откат к Free-версии...');
+    statusText = 'Подписка истекла. Возврат к базовой Free-версии...';
+    notifyListeners();
+
+    // На Android без Shizuku физически не можем трогать Android/data —
+    // не сбрасываем состояние, чтобы оно не врало пользователю.
+    if (Platform.isAndroid) {
+      if (!isShizukuActive) {
+        try {
+          await checkShizukuStatus();
+        } catch (_) {}
+      }
+      if (!isShizukuActive) {
+        addLog(
+          'Shizuku не активен — откат премиум-файлов отложен. '
+          'Откройте Shizuku и повторите вход, чтобы завершить откат.',
+        );
+        statusText = 'Подписка истекла. Нужен Shizuku для отката премиум-файлов.';
+        notifyListeners();
+        return;
+      }
+      try {
+        await _ensureFileService();
+      } catch (e) {
+        addLog('Не удалось подключить файловый сервис Shizuku: $e');
+        statusText = 'Подписка истекла. Ошибка Shizuku при откате.';
+        notifyListeners();
+        return;
+      }
+    }
+
+    final freeFiles = _freeFileSet;
+    final toRevert = await _premiumFilesToRevert(freeFiles, backupDirPath);
+
+    var reverted = 0;
+    for (final rel in toRevert) {
+      final src = _joinPath(backupDirPath, rel);
+      final dst = _joinPath(installPath, rel);
+      try {
+        if (Platform.isWindows) {
+          final srcFile = File(src);
+          if (!await srcFile.exists()) {
+            addLog('Бэкап отсутствует, пропуск: $rel');
+            continue;
+          }
+          await File(dst).parent.create(recursive: true);
+          await srcFile.copy(dst);
+          reverted++;
+          addLog('Откат к оригиналу: $rel');
+        } else if (Platform.isAndroid) {
+          final srcExists = await _fsExists(src);
+          if (!srcExists) {
+            addLog('Бэкап отсутствует (Android), пропуск: $rel');
+            continue;
+          }
+          await _fsCopyFile(src, dst);
+          reverted++;
+          addLog('Shizuku: откат к оригиналу: $rel');
+        }
+      } catch (e) {
+        // Ошибка на одном файле не должна прерывать весь откат.
+        addLog('Не удалось откатить $rel: $e');
+      }
+    }
+
+    // Обновляем состояние: премиум-графика/расширенный текст сняты,
+    // остаётся только базовая free-локализация.
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('installed_art_version', 'v0.0.0');
+      currentArtVersion = 'v0.0.0';
+      remoteArtVersion = '—';
+      hasArtUpdate = false;
+      lastBackupFiles = [];
+      lastBackupKind = null;
+      statusText = 'Подписка истекла. Оставлена базовая Free-версия локализации';
+      addLog('Откат к Free завершён. Возвращено файлов: $reverted.');
+      notifyListeners();
+    } catch (e) {
+      addLog('Откат файлов выполнен, но не удалось сохранить состояние: $e');
+      notifyListeners();
+    }
+  }
+
+  /// Безопасная проверка существования пути на Android (не бросает исключение,
+  /// если Shizuku-сервис недоступен).
+  Future<bool> _safeFsExists(String targetPath) async {
+    try {
+      await _ensureFileService();
+      return await _fsExists(targetPath);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Собирает список относительных путей премиум-файлов, которые нужно
+  /// откатить к оригиналу: объединяет статический список перезаписываемых
+  /// файлов, файлы, забэкапленные в текущей сессии, и (на Windows) реальное
+  /// содержимое папки бэкапа. Базовые free-файлы исключаются.
+  Future<List<String>> _premiumFilesToRevert(
+    Set<String> freeFiles,
+    String backupDirPath,
+  ) async {
+    final candidates = <String>{};
+
+    for (final rel in (Platform.isWindows
+        ? _backupFilesWindows
+        : _backupFilesAndroid)) {
+      candidates.add(rel.replaceAll('\\', '/'));
+    }
+
+    // Файлы, забэкапленные при установке в этой сессии (в т.ч. art-текстуры).
+    for (final rel in lastBackupFiles) {
+      candidates.add(rel.replaceAll('\\', '/'));
+    }
+
+    // На Windows можем дочитать всё, что реально лежит в папке бэкапа,
+    // чтобы покрыть графику и любые дополнительные премиум-файлы.
+    if (Platform.isWindows) {
+      final backupDir = Directory(backupDirPath);
+      if (await backupDir.exists()) {
+        for (final entity
+            in backupDir.listSync(recursive: true).whereType<File>()) {
+          final rel = path
+              .relative(entity.path, from: backupDir.path)
+              .replaceAll('\\', '/');
+          candidates.add(rel);
+        }
+      }
+    }
+
+    return candidates.where((rel) => !freeFiles.contains(rel)).toList();
   }
 
   void _invalidateReleaseCache() {
@@ -277,6 +434,27 @@ class LauncherController extends ChangeNotifier {
     'files/ResLib/Android/configs/language/json_language_en.json.dat',
     'files/ResLib/Android/bundles/cb7baaa1e176dd91dbb5aff21abcb7b0.dat',
   ];
+
+  // Базовые файлы бесплатной версии (перевод сюжета) — они ДОЛЖНЫ остаться
+  // при даунгрейде с Premium на Free. Всё остальное, что перезаписал премиум
+  // (меню, интерфейс, конфиги, текстуры), откатывается к оригиналу игры.
+  static const List<String> _freeFilesWindows = [
+    'reverse1999_Data/StreamingAssets/PersistentRoot/luabytes/9c2019bedb92e2327bfe12024e2922a4.dat',
+    'reverse1999_Data/StreamingAssets/PersistentRoot/luabytes/6ac5a62c64b72b07e9383583eef5c3ac.dat',
+    'reverse1999_Data/StreamingAssets/PersistentRoot/bundles/cb7baaa1e176dd91dbb5aff21abcb7b0.dat',
+  ];
+
+  static const List<String> _freeFilesAndroid = [
+    'files/ResLib/Android/luabytes/9c2019bedb92e2327bfe12024e2922a4.dat',
+    'files/ResLib/Android/luabytes/6ac5a62c64b72b07e9383583eef5c3ac.dat',
+    'files/ResLib/Android/bundles/cb7baaa1e176dd91dbb5aff21abcb7b0.dat',
+  ];
+
+  /// Нормализованный набор путей базовых free-файлов для текущей платформы.
+  Set<String> get _freeFileSet =>
+      (Platform.isAndroid ? _freeFilesAndroid : _freeFilesWindows)
+          .map((rel) => rel.replaceAll('\\', '/'))
+          .toSet();
 
   String _backupFolderName() {
     return path.join(installPath, 'backup_solidleaf');

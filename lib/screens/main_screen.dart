@@ -97,6 +97,228 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
+  /// Пошаговая инструкция по настройке Shizuku на Android. Открывается по чипу
+  /// «Shizuku» в шапке и по кнопке в баннере, когда Shizuku не активен.
+  Future<void> _showShizukuGuide(LauncherController controller) async {
+    final scheme = Theme.of(context).colorScheme;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).cardColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        // Consumer, чтобы статус в шапке инструкции обновлялся после
+        // нажатия «Проверить снова» без закрытия листа.
+        return Consumer<LauncherController>(
+          builder: (ctx, ctrl, _) {
+            final active = ctrl.isShizukuActive;
+            final textColor = Theme.of(ctx).textTheme.bodyMedium?.color;
+            return SafeArea(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: 20,
+                  right: 20,
+                  top: 12,
+                  bottom: 16 + MediaQuery.of(ctx).viewInsets.bottom,
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          margin: const EdgeInsets.only(bottom: 16),
+                          decoration: BoxDecoration(
+                            color: Colors.white24,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                      _infoDialogTitle(
+                        Icons.security_rounded,
+                        'Настройка Shizuku',
+                      ),
+                      const SizedBox(height: 12),
+                      // Текущий статус Shizuku.
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: (active ? Colors.green : scheme.error)
+                              .withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              active
+                                  ? Icons.check_circle_rounded
+                                  : Icons.error_outline_rounded,
+                              color: active ? Colors.green : scheme.error,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                active
+                                    ? 'Shizuku активен — можно устанавливать локализацию.'
+                                    : 'Shizuku не активен. Следуйте шагам ниже.',
+                                style: TextStyle(
+                                  color: textColor,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Shizuku нужен, чтобы лаунчер мог копировать файлы '
+                        'русификатора в защищённую папку Android/data — без '
+                        'root и без подключения к ПК.',
+                        style: TextStyle(
+                          color: textColor?.withValues(alpha: 0.8),
+                          fontSize: 13,
+                          height: 1.35,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      _shizukuStep(
+                        1,
+                        'Установите приложение Shizuku',
+                        'Нажмите «Скачать Shizuku» ниже и установите APK '
+                            '(или из Google Play / F-Droid).',
+                      ),
+                      _shizukuStep(
+                        2,
+                        'Включите «Параметры разработчика»',
+                        'Настройки → «О телефоне» → нажмите 7 раз по '
+                            '«Номер сборки».',
+                      ),
+                      _shizukuStep(
+                        3,
+                        'Включите «Беспроводную отладку»',
+                        'Настройки → «Для разработчиков» → включите '
+                            '«Беспроводная отладка».',
+                      ),
+                      _shizukuStep(
+                        4,
+                        'Запустите Shizuku без ПК',
+                        'Откройте Shizuku → «Запустить через беспроводную '
+                            'отладку» и следуйте подсказкам (сопряжение по коду).',
+                      ),
+                      _shizukuStep(
+                        5,
+                        'Выдайте доступ лаунчеру',
+                        'При первом запросе разрешите этому приложению доступ '
+                            'в Shizuku.',
+                      ),
+                      _shizukuStep(
+                        6,
+                        'Проверьте статус',
+                        'Вернитесь сюда и нажмите «Проверить снова».',
+                        last: true,
+                      ),
+                      const SizedBox(height: 8),
+                      _fullWidthDialogButton(
+                        icon: Icons.download_rounded,
+                        label: 'Скачать Shizuku',
+                        onPressed: () => _openExternalLink(shizukuDownloadUrl),
+                      ),
+                      const SizedBox(height: 8),
+                      _fullWidthDialogButton(
+                        icon: Icons.menu_book_rounded,
+                        label: 'Подробная инструкция (сайт)',
+                        onPressed: () => _openExternalLink(shizukuGuideUrl),
+                      ),
+                      const SizedBox(height: 8),
+                      _fullWidthDialogButton(
+                        icon: Icons.refresh_rounded,
+                        label: 'Проверить снова',
+                        filled: true,
+                        onPressed: () async {
+                          await ctrl.checkShizukuStatus();
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// Один пронумерованный шаг инструкции по Shizuku.
+  Widget _shizukuStep(
+    int number,
+    String title,
+    String subtitle, {
+    bool last = false,
+  }) {
+    final textColor = Theme.of(context).textTheme.bodyMedium?.color;
+    return Padding(
+      padding: EdgeInsets.only(bottom: last ? 16 : 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 24,
+            height: 24,
+            alignment: Alignment.center,
+            decoration: const BoxDecoration(
+              color: Color(0xFF6C4BF6),
+              shape: BoxShape.circle,
+            ),
+            child: Text(
+              '$number',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    color: textColor?.withValues(alpha: 0.75),
+                    fontSize: 12.5,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -979,7 +1201,7 @@ class _MainScreenState extends State<MainScreen> {
                   tooltip: 'Сменить тему',
                 ),
                 ElevatedButton.icon(
-                  onPressed: controller.checkShizukuStatus,
+                  onPressed: () => _showShizukuGuide(controller),
                   icon: const Icon(Icons.security_rounded),
                   label: const Text('Shizuku'),
                 ),
@@ -994,14 +1216,48 @@ class _MainScreenState extends State<MainScreen> {
             const SizedBox(height: 16),
             _buildSettingsCard(controller),
             if (!controller.isShizukuActive)
-              Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: Text(
-                  'Shizuku не активен — установка на Android невозможна',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.error,
-                    fontSize: 12,
+              Container(
+                margin: const EdgeInsets.only(top: 10),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.error.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.error.withValues(alpha: 0.35),
                   ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.error_outline_rounded,
+                      color: Theme.of(context).colorScheme.error,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Shizuku не активен — установка на Android невозможна',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: () => _showShizukuGuide(controller),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        minimumSize: const Size(0, 32),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text('Как настроить?'),
+                    ),
+                  ],
                 ),
               ),
             const SizedBox(height: 16),
