@@ -22,8 +22,6 @@ class MainScreen extends StatefulWidget {
 }
 
 class _MainScreenState extends State<MainScreen> {
-  final ScrollController _logScrollController = ScrollController();
-
   Future<void> _openExternalLink(String url) async {
     final uri = Uri.parse(url);
     final messenger = ScaffoldMessenger.maybeOf(context);
@@ -42,12 +40,6 @@ class _MainScreenState extends State<MainScreen> {
       if (!mounted) return;
       context.read<LauncherController>().initialize();
     });
-  }
-
-  @override
-  void dispose() {
-    _logScrollController.dispose();
-    super.dispose();
   }
 
   Future<void> _runInstallFlow() async {
@@ -331,14 +323,6 @@ class _MainScreenState extends State<MainScreen> {
     final controller = context.watch<LauncherController>();
     final isAndroidUi = Platform.isAndroid;
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_logScrollController.hasClients) {
-        _logScrollController.jumpTo(
-          _logScrollController.position.maxScrollExtent,
-        );
-      }
-    });
-
     return Scaffold(
       body: Column(
         children: [
@@ -600,37 +584,6 @@ class _MainScreenState extends State<MainScreen> {
                       ),
                       const SizedBox(height: 12),
                       _buildUpdateInfoPanel(controller, height: 130),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        height: 180,
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).cardColor,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: Theme.of(context).dividerColor,
-                              width: 1,
-                            ),
-                          ),
-                          child: ListView.builder(
-                            controller: _logScrollController,
-                            itemCount: controller.logs.length,
-                            itemBuilder: (_, index) {
-                              return Text(
-                                controller.logs[index],
-                                style: TextStyle(
-                                  color: Theme.of(context)
-                                      .textTheme
-                                      .bodySmall
-                                      ?.color,
-                                  fontSize: 12,
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      ),
                       const SizedBox(height: 16),
                       Align(
                         alignment: Alignment.bottomRight,

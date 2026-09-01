@@ -93,8 +93,9 @@ class LauncherController extends ChangeNotifier {
       final token = GitHubConfig.premiumToken;
       if (token.isEmpty) {
         throw Exception(
-          'GITHUB_TOKEN не настроен. Соберите приложение с '
-          '--dart-define=GITHUB_TOKEN=<ваш_токен> для доступа к премиум-релизам.',
+          'GITHUB_TOKEN не настроен. Создайте secrets/github_token.txt '
+          'или dart_defines.local.json (см. dart_defines.local.json.example), '
+          'либо соберите с --dart-define=GITHUB_TOKEN=<ваш_токен>.',
         );
       }
       headers['Authorization'] = 'Bearer $token';

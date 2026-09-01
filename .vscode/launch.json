@@ -1,9 +1,18 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
-    "version": "0.2.0",
-    "configurations": [
-    
-    ]
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "re_1999_solidleaf (local secrets)",
+      "request": "launch",
+      "type": "dart",
+      "toolArgs": [
+        "--dart-define-from-file=dart_defines.local.json"
+      ]
+    },
+    {
+      "name": "re_1999_solidleaf",
+      "request": "launch",
+      "type": "dart"
+    }
+  ]
 }
