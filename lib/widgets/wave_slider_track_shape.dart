@@ -1,9 +1,10 @@
-﻿import 'dart:math' as math;
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+
 class WaveSliderTrackShape extends SliderTrackShape {
-  final double waveHeight; // Р’С‹СЃРѕС‚Р° РІРѕР»РЅС‹
-  final double waveLength; // Р”Р»РёРЅР° РІРѕР»РЅС‹ (СЂР°СЃСЃС‚РѕСЏРЅРёРµ РјРµР¶РґСѓ РїРёРєР°РјРё)
+  final double waveHeight; // Высота волны
+  final double waveLength; // Длина волны (расстояние между пиками)
 
   WaveSliderTrackShape({this.waveHeight = 3.0, this.waveLength = 12.0});
 
@@ -17,8 +18,10 @@ class WaveSliderTrackShape extends SliderTrackShape {
   }) {
     final double trackHeight = sliderTheme.trackHeight ?? 3.0;
     final double trackLeft = offset.dx;
-    final double trackTop = offset.dy + (parentBox.size.height - trackHeight) / 2;
-    return Rect.fromLTWH(trackLeft, trackTop, parentBox.size.width, trackHeight);
+    final double trackTop =
+        offset.dy + (parentBox.size.height - trackHeight) / 2;
+    final double trackWidth = parentBox.size.width;
+    return Rect.fromLTWH(trackLeft, trackTop, trackWidth, trackHeight);
   }
 
   @override
@@ -30,8 +33,8 @@ class WaveSliderTrackShape extends SliderTrackShape {
     required Animation<double> enableAnimation,
     required Offset thumbCenter,
     Offset? secondaryOffset,
-    bool isEnabled = false,
     bool isDiscrete = false,
+    bool isEnabled = false,
     required TextDirection textDirection,
   }) {
     final Canvas canvas = context.canvas;
@@ -39,36 +42,37 @@ class WaveSliderTrackShape extends SliderTrackShape {
       parentBox: parentBox,
       offset: offset,
       sliderTheme: sliderTheme,
+      isEnabled: isEnabled,
+      isDiscrete: isDiscrete,
     );
 
-    // РћС‚СЂРёСЃРѕРІРєР° Р°РєС‚РёРІРЅРѕР№ С‡Р°СЃС‚Рё (Р’РѕР»РЅР°)
+    // Отрисовка активной части (Волна)
     final Path activePath = Path();
-    activePath.moveTo(trackRect.left, trackRect.centerLeft.dy);
-
-    for (double x = trackRect.left; x <= thumbCenter.dx; x += 1) {
-      final double relativeX = x - trackRect.left;
-      final double y = trackRect.centerLeft.dy +
-          math.sin(relativeX / waveLength * 1 * math.pi) * waveHeight;
-      activePath.lineTo(x, y);
+    final double activeWidth = thumbCenter.dx - trackRect.left;
+    activePath.moveTo(trackRect.left, trackRect.center.dy);
+    for (double x = 0; x < activeWidth; x += 1) {
+      final double y = trackRect.center.dy +
+          math.sin((x / waveLength) * 2 * math.pi) * waveHeight;
+      activePath.lineTo(trackRect.left + x, y);
     }
 
     final Paint activePaint = Paint()
-      ..color = sliderTheme.activeTrackColor ?? Colors.blue
+      ..color = sliderTheme.activeTrackColor ?? Colors.purple
       ..style = PaintingStyle.stroke
       ..strokeWidth = sliderTheme.trackHeight ?? 3.0
       ..strokeCap = StrokeCap.round;
 
     canvas.drawPath(activePath, activePaint);
 
-    // РћС‚СЂРёСЃРѕРІРєР° РЅРµР°РєС‚РёРІРЅРѕР№ С‡Р°СЃС‚Рё (РџСЂСЏРјР°СЏ Р»РёРЅРёСЏ)
-    final Path inactivePath = Path();
-    inactivePath.moveTo(thumbCenter.dx, trackRect.centerLeft.dy);
-    inactivePath.lineTo(trackRect.right, trackRect.centerLeft.dy);
+    // Отрисовка неактивной части (Прямая линия)
+    final Path inactivePath = Path()
+      ..moveTo(thumbCenter.dx, trackRect.center.dy)
+      ..lineTo(trackRect.right, trackRect.center.dy);
 
     final Paint inactivePaint = Paint()
       ..color = sliderTheme.inactiveTrackColor ?? Colors.grey
       ..style = PaintingStyle.stroke
-      ..strokeWidth = sliderTheme.trackHeight ?? 1.0
+      ..strokeWidth = sliderTheme.trackHeight ?? 3.0
       ..strokeCap = StrokeCap.round;
 
     canvas.drawPath(inactivePath, inactivePaint);

@@ -1,4 +1,4 @@
-﻿// --- Модели данных ---
+// --- Модели данных ---
 class AudioTrack {
   final String title;
   final String fileName;

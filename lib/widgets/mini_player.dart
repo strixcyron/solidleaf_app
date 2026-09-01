@@ -1,10 +1,10 @@
-﻿import 'package:audioplayers/audioplayers.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:text_scroll/text_scroll.dart';
 
 import '../models/audio_track.dart';
 import 'wave_slider_track_shape.dart';
-// --- РџР»РµРµСЂ ---
+
 class MiniPlayer extends StatefulWidget {
   const MiniPlayer({super.key});
 
@@ -21,7 +21,7 @@ class _MiniPlayerState extends State<MiniPlayer>
   Duration _duration = Duration.zero;
   Duration _position = Duration.zero;
 
-  // РЎРїРёСЃРѕРє Р°Р»СЊР±РѕРјРѕРІ
+  // Список альбомов
   final List<Album> albums = [
     Album(
       title: 'The Suitcase OST',
@@ -68,7 +68,7 @@ class _MiniPlayerState extends State<MiniPlayer>
       ],
     ),
     Album(
-      title: 'РџРѕР»СЏСЂРЅР°СЏ РЅРѕС‡СЊ',
+      title: 'Полярная ночь',
       coverAsset: 'assets/images/music_cover/polar_night.jpg',
       year: '2024',
       tracks: [
@@ -88,7 +88,7 @@ class _MiniPlayerState extends State<MiniPlayer>
     ),
   ];
 
-  // РџР»РѕСЃРєРёР№ СЃРїРёСЃРѕРє РІСЃРµС… С‚СЂРµРєРѕРІ РґР»СЏ РїРµСЂРµРєР»СЋС‡РµРЅРёСЏ РєРЅРѕРїРєР°РјРё Next/Prev
+  // Плоский список всех треков для переключения кнопками Next/Prev
   List<AudioTrack> get allTracks =>
       albums.expand((album) => album.tracks).toList();
 
@@ -102,7 +102,7 @@ class _MiniPlayerState extends State<MiniPlayer>
       duration: const Duration(seconds: 4),
     );
 
-    // РЎР»СѓС€Р°С‚РµР»Рё РІСЂРµРјРµРЅРё РґР»СЏ РїСЂРѕРіСЂРµСЃСЃ-Р±Р°СЂР°
+    // Слушатели времени для прогресс-бара
     player.onDurationChanged.listen((d) {
       if (mounted) setState(() => _duration = d);
     });
@@ -178,7 +178,7 @@ class _MiniPlayerState extends State<MiniPlayer>
     return '$minutes:$seconds';
   }
 
-// РћРєРЅРѕ СЃ Р°Р»СЊР±РѕРјР°РјРё Рё С‚СЂРµРєР°РјРё
+// Окно с альбомами и треками
   void _showPlaylist() {
     showDialog(
       context: context,
@@ -197,8 +197,8 @@ class _MiniPlayerState extends State<MiniPlayer>
                       onPressed: () => setDialogState(() => selectedAlbum = null),
                     ),
                   Text(
-                    // Р•СЃР»Рё Р°Р»СЊР±РѕРј РѕС‚РєСЂС‹С‚, РјРѕР¶РЅРѕ РЅР°РїРёСЃР°С‚СЊ "РќР°Р·Р°Рґ" РёР»Рё РѕСЃС‚Р°РІРёС‚СЊ РЅР°Р·РІР°РЅРёРµ
-                    selectedAlbum == null ? 'РђР»СЊР±РѕРјС‹' : 'РђР»СЊР±РѕРј',
+                    // Если альбом открыт, можно написать "Назад" или оставить название
+                    selectedAlbum == null ? 'Альбомы' : 'Альбом',
                     style: TextStyle(
                       color: Theme.of(context).textTheme.bodyMedium?.color,
                       fontSize: 18,
@@ -208,9 +208,9 @@ class _MiniPlayerState extends State<MiniPlayer>
               ),
               content: SizedBox(
                 width: 360,
-                height: 500, // РЈРІРµР»РёС‡РёР» РІС‹СЃРѕС‚Сѓ, С‡С‚РѕР±С‹ РІР»РµР·Р»Р° РєРІР°РґСЂР°С‚РЅР°СЏ РѕР±Р»РѕР¶РєР° Рё С‚СЂРµРєРё
+                height: 500, // Увеличил высоту, чтобы влезла квадратная обложка и треки
                 child: selectedAlbum == null
-                    // --- РЎРїРёСЃРѕРє Р°Р»СЊР±РѕРјРѕРІ (РґРѕ РѕС‚РєСЂС‹С‚РёСЏ) ---
+                    // --- Список альбомов (до открытия) ---
                     ? ListView.separated(
                         itemCount: albums.length,
                         separatorBuilder: (_, __) => const SizedBox(height: 10),
@@ -259,7 +259,7 @@ class _MiniPlayerState extends State<MiniPlayer>
                                         ),
                                         const SizedBox(height: 4),
                                         Text(
-                                          'Р“РѕРґ: ${album.year} вЂў РўСЂРµРєРѕРІ: ${album.tracks.length}',
+                                          'Год: ${album.year} • Треков: ${album.tracks.length}',
                                           style: TextStyle(
                                             fontSize: 12,
                                             color: Theme.of(context)
@@ -278,25 +278,25 @@ class _MiniPlayerState extends State<MiniPlayer>
                           );
                         },
                       )
-                    // --- РЎРѕРґРµСЂР¶РёРјРѕРµ РІС‹Р±СЂР°РЅРЅРѕРіРѕ Р°Р»СЊР±РѕРјР° ---
+                    // --- Содержимое выбранного альбома ---
                     : Column(
                         children: [
-                          // РЁР°РїРєР° Р°Р»СЊР±РѕРјР° (РљРІР°РґСЂР°С‚РЅР°СЏ РѕР±Р»РѕР¶РєР° СЃ РіСЂР°РґРёРµРЅС‚РѕРј)
+                          // Шапка альбома (Квадратная обложка с градиентом)
                           Center(
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(12),
                               child: SizedBox(
-                                width: 355, // Р—Р°РґР°РµРј РєРІР°РґСЂР°С‚РЅС‹Рµ РїСЂРѕРїРѕСЂС†РёРё
+                                width: 355, // Задаем квадратные пропорции
                                 height: 300, 
                                 child: Stack(
                                   fit: StackFit.expand,
                                   children: [
-                                    // РЎР°РјР° РѕР±Р»РѕР¶РєР°
+                                    // Сама обложка
                                     Image.asset(
                                       selectedAlbum!.coverAsset,
                                       fit: BoxFit.cover,
                                     ),
-                                    // Р“СЂР°РґРёРµРЅС‚РЅРѕРµ Р·Р°С‚РµРјРЅРµРЅРёРµ (РїР»Р°РІРЅРѕ РѕС‚ С†РµРЅС‚СЂР° Рє РЅРёР·Сѓ)
+                                    // Градиентное затемнение (плавно от центра к низу)
                                     DecoratedBox(
                                       decoration: BoxDecoration(
                                         gradient: LinearGradient(
@@ -311,7 +311,7 @@ class _MiniPlayerState extends State<MiniPlayer>
                                         ),
                                       ),
                                     ),
-                                    // РўРµРєСЃС‚ РїРѕРІРµСЂС… Р·Р°С‚РµРјРЅРµРЅРёСЏ
+                                    // Текст поверх затемнения
                                     Positioned(
                                       left: 16,
                                       right: 16,
@@ -325,14 +325,14 @@ class _MiniPlayerState extends State<MiniPlayer>
                                             style: const TextStyle(
                                               fontSize: 20,
                                               fontWeight: FontWeight.bold,
-                                              color: Colors.white, // Р‘РµР»С‹Р№ РґР»СЏ РєРѕРЅС‚СЂР°СЃС‚Р°
+                                              color: Colors.white, // Белый для контраста
                                             ),
                                             maxLines: 2,
                                             overflow: TextOverflow.ellipsis,
                                           ),
                                           const SizedBox(height: 4),
                                           Text(
-                                            'Р’С‹РїСѓСЃРє: ${selectedAlbum!.year} РіРѕРґ',
+                                            'Выпуск: ${selectedAlbum!.year} год',
                                             style: TextStyle(
                                               fontSize: 13,
                                               color: Colors.white.withValues(alpha: 0.8),
@@ -347,7 +347,7 @@ class _MiniPlayerState extends State<MiniPlayer>
                             ),
                           ),
                           const Divider(height: 20),
-                          // РЎРїРёСЃРѕРє С‚СЂРµРєРѕРІ Р°Р»СЊР±РѕРјР°
+                          // Список треков альбома
                           Expanded(
                             child: ListView.separated(
                               itemCount: selectedAlbum!.tracks.length,
@@ -440,7 +440,7 @@ class _MiniPlayerState extends State<MiniPlayer>
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(ctx).pop(),
-                  child: const Text('Р—Р°РєСЂС‹С‚СЊ'),
+                  child: const Text('Закрыть'),
                 ),
               ],
             );
@@ -466,12 +466,12 @@ class _MiniPlayerState extends State<MiniPlayer>
         children: [
           Row(
             children: [
- // Р’РёРЅРёР»РѕРІР°СЏ РїР»Р°СЃС‚РёРЅРєР°
+ // Виниловая пластинка
               RotationTransition(
                 turns: _vinylController,
                 child: Container(
-                  width: 56, // РЈРІРµР»РёС‡РёР» РѕР±С‰СѓСЋ С€РёСЂРёРЅСѓ РїР»Р°СЃС‚РёРЅРєРё (Р±С‹Р»Рѕ 50)
-                  height: 56, // РЈРІРµР»РёС‡РёР» РѕР±С‰СѓСЋ РІС‹СЃРѕС‚Сѓ (Р±С‹Р»Рѕ 50)
+                  width: 56, // Увеличил общую ширину пластинки (было 50)
+                  height: 56, // Увеличил общую высоту (было 50)
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: const Color(0xFF111111),
@@ -485,7 +485,7 @@ class _MiniPlayerState extends State<MiniPlayer>
                     ],
                   ),
                   child: Padding(
-                    // РЈРјРµРЅСЊС€РёР» РѕС‚СЃС‚СѓРї, С‡С‚РѕР±С‹ РєР°СЂС‚РёРЅРєР° Р·Р°РЅСЏР»Р° Р±РѕР»СЊС€Рµ РјРµСЃС‚Р° (Р±С‹Р»Рѕ 8.0)
+                    // Уменьшил отступ, чтобы картинка заняла больше места (было 8.0)
                     padding: const EdgeInsets.all(3.0),
                     child: ClipOval(
                       child: Image.asset(track.coverAsset, fit: BoxFit.cover),
@@ -495,7 +495,7 @@ class _MiniPlayerState extends State<MiniPlayer>
               ),
               const SizedBox(width: 12),
 
-              // РќР°Р·РІР°РЅРёРµ С‚СЂРµРєР° (Р‘РµРіСѓС‰Р°СЏ СЃС‚СЂРѕРєР°)
+              // Название трека (Бегущая строка)
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -508,9 +508,9 @@ class _MiniPlayerState extends State<MiniPlayer>
                       delayBefore: const Duration(seconds: 2), 
                       pauseBetween: const Duration(seconds: 1), 
                       
-                      // --- Р­С„С„РµРєС‚ РЅР°С‚РёРІРЅРѕРіРѕ РёРЅС‚РµСЂС„РµР№СЃР° (СЂР°СЃС‚РІРѕСЂРµРЅРёРµ РєСЂР°РµРІ) ---
+                      // --- Эффект нативного интерфейса (растворение краев) ---
                       fadedBorder: true, 
-                      fadedBorderWidth: 0.1, // 10% С€РёСЂРёРЅС‹ РІРёРґР¶РµС‚Р° Р±СѓРґРµС‚ СѓС…РѕРґРёС‚СЊ РІ РїР»Р°РІРЅС‹Р№ РіСЂР°РґРёРµРЅС‚
+                      fadedBorderWidth: 0.1, // 10% ширины виджета будет уходить в плавный градиент
                       // --------------------------------------------------------
 
                       style: TextStyle(
@@ -521,7 +521,7 @@ class _MiniPlayerState extends State<MiniPlayer>
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'Р’РѕСЃРїСЂРѕРёР·РІРµРґРµРЅРёРµ',
+                      'Воспроизведение',
                       style: TextStyle(
                         color: Theme.of(context).textTheme.bodySmall?.color,
                         fontSize: 11,
@@ -531,26 +531,26 @@ class _MiniPlayerState extends State<MiniPlayer>
                 ),
               ),
 
-              // РљРЅРѕРїРєР° РїР»РµР№Р»РёСЃС‚Р°/Р°Р»СЊР±РѕРјРѕРІ
+              // Кнопка плейлиста/альбомов
               IconButton(
                 icon: Icon(
                   Icons.queue_music_rounded,
                   color: Theme.of(context).colorScheme.primary,
                 ),
-                tooltip: 'РђР»СЊР±РѕРјС‹',
+                tooltip: 'Альбомы',
                 onPressed: _showPlaylist,
               ),
             ],
           ),
 
-// РџСЂРѕРіСЂРµСЃСЃ-Р±Р°СЂ РґР»РёС‚РµР»СЊРЅРѕСЃС‚Рё
+// Прогресс-бар длительности
           Padding(
             padding: const EdgeInsets.only(top: 8.0),
             child: Column(
               children: [
                 SliderTheme(
                   data: SliderTheme.of(context).copyWith(
-                    // --- РџРћР”РљР›Р®Р§РђР•Рњ РќРђРЁ РљРђРЎРўРћРњРќР«Р™ РљР›РђРЎРЎ Р’РћР›РќР« ---
+                    // --- ПОДКЛЮЧАЕМ НАШ КАСТОМНЫЙ КЛАСС ВОЛНЫ ---
                     trackShape: WaveSliderTrackShape(waveHeight: 3.0, waveLength: 12.0), 
                     trackHeight: 3,
                     thumbShape:
@@ -562,7 +562,7 @@ class _MiniPlayerState extends State<MiniPlayer>
                         Theme.of(context).dividerColor.withValues(alpha: 0.3),
                     thumbColor: Theme.of(context).colorScheme.primary,
                   ),
-                  // --- Р’Р•Р РќРЈР›Р РЎРўРђРќР”РђР РўРќР«Р™ SLIDER ---
+                  // --- ВЕРНУЛИ СТАНДАРТНЫЙ SLIDER ---
                   child: Slider(
                     value: _position.inSeconds.toDouble().clamp(
                           0,
@@ -609,7 +609,7 @@ class _MiniPlayerState extends State<MiniPlayer>
 
 
 
-          // Р­Р»РµРјРµРЅС‚С‹ СѓРїСЂР°РІР»РµРЅРёСЏ
+          // Элементы управления
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [

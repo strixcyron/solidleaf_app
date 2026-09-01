@@ -35,22 +35,23 @@ class LauncherController extends ChangeNotifier {
   String installPath = '';
   String currentVersion = 'v0.0.0';
   String currentArtVersion = 'v0.0.0';
-  String remoteVersion = 'вЂ”';
-  String remoteArtVersion = 'вЂ”';
-  String changelog = 'РџСЂРѕРІРµСЂРєР° РѕР±РЅРѕРІР»РµРЅРёР№ РЅРµ Р·Р°РїСѓСЃРєР°Р»Р°СЃСЊ';
-  String statusText = 'Р“РѕС‚РѕРІРѕ';
+  String remoteVersion = '—';
+  String remoteArtVersion = '—';
+  String changelog = 'Проверка обновлений не запускалась';
+  String statusText = 'Готово';
   List<String> logs = [];
 
   Map<String, dynamic>? _cachedRelease;
   DateTime? _cachedReleaseAt;
-  bool? _cachedReleaseIsPremium;
   static const _releaseCacheTtl = Duration(seconds: 45);
+
+  bool? _cachedReleaseIsPremium;
 
   // --- Telegram account tiers (login-gated launcher access) ----------------
   // The auth backend now issues a JWT to ANY member of the public community
-  // group (t.me/reverse1999_solidleaf) вЂ” that's enough to use the launcher
+  // group (t.me/reverse1999_solidleaf) — that's enough to use the launcher
   // and its text localization. Only members of the private premium channel
-  // get access_level == "premium", which unlocks the "Р“СЂР°С„РёРєР° Рё С‚РµРєСЃС‚СѓСЂС‹"
+  // get access_level == "premium", which unlocks the "Графика и текстуры"
   // card. [isPremium] reflects that server-decided tier, not merely "has a
   // token" (see TelegramAuthService.hasPremiumAccess).
   final TelegramAuthService telegramAuth = TelegramAuthService();
@@ -139,7 +140,7 @@ class LauncherController extends ChangeNotifier {
       return '/storage/emulated/0/Android/data/com.bluepoch.m.en.reverse1999/';
     }
     if (Platform.isWindows) {
-      return r'РЈРєР°Р¶РёС‚Рµ РїСѓС‚СЊ Рє РёРіСЂРµ, РЅР°РїСЂРёРјРµСЂ: C:\Games\Reverse1999\Reverse1999_EN';
+      return r'Укажите путь к игре, например: C:\Games\Reverse1999\Reverse1999_EN';
     }
     return '/tmp/reverse1999_localization';
   }
@@ -192,31 +193,31 @@ class LauncherController extends ChangeNotifier {
             await methodChannel.invokeMethod<bool>('ensureFileService') ??
             false;
         if (ok) {
-          if (statusText.startsWith('Shizuku РЅРµ РїРѕРґРєР»СЋС‡С‘РЅ') ||
-              statusText.startsWith('РџРѕРґРєР»СЋС‡РµРЅРёРµ Рє Shizuku')) {
-            statusText = 'Shizuku: СЃРµСЂРІРёСЃ РґРѕСЃС‚СѓРїРµРЅ';
+          if (statusText.startsWith('Shizuku не подключён') ||
+              statusText.startsWith('Подключение к Shizuku')) {
+            statusText = 'Shizuku: сервис доступен';
             notifyListeners();
           }
           return;
         }
-        lastError = Exception('РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґРєР»СЋС‡РёС‚СЊ Shizuku file service');
+        lastError = Exception('Не удалось подключить Shizuku file service');
       } on PlatformException catch (e) {
         final message =
-            'Shizuku file service РЅРµРґРѕСЃС‚СѓРїРµРЅ: ${e.message ?? e.code}';
+            'Shizuku file service недоступен: ${e.message ?? e.code}';
         lastError = Exception(message);
       } catch (e) {
         lastError = e;
       }
 
       if (attempt < attempts) {
-        statusText = 'РџРѕРґРєР»СЋС‡РµРЅРёРµ Рє Shizuku... РїРѕРїС‹С‚РєР° $attempt/$attempts';
+        statusText = 'Подключение к Shizuku... попытка $attempt/$attempts';
         notifyListeners();
         await Future.delayed(Duration(milliseconds: 700 * attempt));
       }
     }
 
     const message =
-        'Shizuku РЅРµ РїРѕРґРєР»СЋС‡С‘РЅ. РћС‚РєСЂРѕР№С‚Рµ Shizuku, РЅР°Р¶РјРёС‚Рµ Start, СЂР°Р·СЂРµС€РёС‚Рµ РґРѕСЃС‚СѓРї РїСЂРёР»РѕР¶РµРЅРёСЋ Рё РїРѕРІС‚РѕСЂРёС‚Рµ РїРѕРїС‹С‚РєСѓ.';
+        'Shizuku не подключён. Откройте Shizuku, нажмите Start, разрешите доступ приложению и повторите попытку.';
     statusText = message;
     addLog(message);
     notifyListeners();
@@ -286,11 +287,11 @@ class LauncherController extends ChangeNotifier {
     await _fsMkdirs(path.dirname(dst));
     final size = await _fsFileSize(src);
     if (size < 0) {
-      throw Exception('РСЃС‚РѕС‡РЅРёРє РЅРµ РЅР°Р№РґРµРЅ РёР»Рё РЅРµРґРѕСЃС‚СѓРїРµРЅ: $src');
+      throw Exception('Источник не найден или недоступен: $src');
     }
     if (size == 0) {
       final ok = await _fsWriteChunk(dst, Uint8List(0), false);
-      if (!ok) throw Exception('РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ РїСѓСЃС‚РѕР№ С„Р°Р№Р»: $dst');
+      if (!ok) throw Exception('Не удалось создать пустой файл: $dst');
       return;
     }
     var offset = 0;
@@ -301,11 +302,11 @@ class LauncherController extends ChangeNotifier {
           : (size - offset);
       final chunk = await _fsReadChunk(src, offset, len);
       if (chunk == null) {
-        throw Exception('РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ $src РЅР° СЃРјРµС‰РµРЅРёРё $offset');
+        throw Exception('Не удалось прочитать $src на смещении $offset');
       }
       final ok = await _fsWriteChunk(dst, chunk, !first);
       if (!ok) {
-        throw Exception('РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РїРёСЃР°С‚СЊ РІ $dst');
+        throw Exception('Не удалось записать в $dst');
       }
       first = false;
       offset += len;
@@ -317,7 +318,7 @@ class LauncherController extends ChangeNotifier {
     final data = await localFile.readAsBytes();
     if (data.isEmpty) {
       final ok = await _fsWriteChunk(dstPath, Uint8List(0), false);
-      if (!ok) throw Exception('РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ РїСѓСЃС‚РѕР№ С„Р°Р№Р»: $dstPath');
+      if (!ok) throw Exception('Не удалось создать пустой файл: $dstPath');
       return;
     }
     var offset = 0;
@@ -329,7 +330,7 @@ class LauncherController extends ChangeNotifier {
       final chunk = Uint8List.sublistView(data, offset, end);
       final ok = await _fsWriteChunk(dstPath, chunk, !first);
       if (!ok) {
-        throw Exception('РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РїРёСЃР°С‚СЊ С‡Р°РЅРє РІ $dstPath (offset=$offset)');
+        throw Exception('Не удалось записать чанк в $dstPath (offset=$offset)');
       }
       first = false;
       offset = end;
@@ -343,7 +344,7 @@ class LauncherController extends ChangeNotifier {
     String? kind,
   }) async {
     final backupDirPath = _backupFolderName();
-    addLog('РЎРѕР·РґР°РЅРёРµ СЂРµР·РµСЂРІРЅРѕР№ РєРѕРїРёРё С„Р°Р№Р»РѕРІ...');
+    addLog('Создание резервной копии файлов...');
 
     lastBackupFiles = [];
     lastBackupKind = kind;
@@ -351,7 +352,7 @@ class LauncherController extends ChangeNotifier {
     try {
       if (Platform.isAndroid) {
         if (!isShizukuActive) {
-          addLog('Shizuku РЅРµ Р°РєС‚РёРІРµРЅ вЂ” СЃРѕР·РґР°РЅРёРµ Р±СЌРєР°РїР° РЅР° Android РЅРµРІРѕР·РјРѕР¶РЅРѕ');
+          addLog('Shizuku не активен — создание бэкапа на Android невозможно');
           throw Exception('Shizuku required for Android backup');
         }
         await _ensureFileService();
@@ -359,7 +360,7 @@ class LauncherController extends ChangeNotifier {
         if (exists) {
           final ok = await _fsDeleteRecursive(backupDirPath);
           if (!ok) {
-            addLog('РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‡РёСЃС‚РёС‚СЊ РїСЂРµРґС‹РґСѓС‰РёР№ Р±СЌРєР°Рї С‡РµСЂРµР· Shizuku');
+            addLog('Не удалось очистить предыдущий бэкап через Shizuku');
           }
         }
         await _fsMkdirs(backupDirPath);
@@ -385,7 +386,7 @@ class LauncherController extends ChangeNotifier {
           await _fsCopyFile(targetPath, backupPath);
           copied++;
           lastBackupFiles.add(rel);
-          addLog('Р‘СЌРєР°Рї (Shizuku): $rel');
+          addLog('Бэкап (Shizuku): $rel');
         } else {
           final targetFile = File(targetPath);
           if (!await targetFile.exists()) {
@@ -396,17 +397,17 @@ class LauncherController extends ChangeNotifier {
           await targetFile.copy(backupFile.path);
           copied++;
           lastBackupFiles.add(rel);
-          addLog('Р‘СЌРєР°Рї: $rel');
+          addLog('Бэкап: $rel');
         }
       }
 
       addLog(
         copied == 0
-            ? 'РќРµС‡РµРіРѕ РєРѕРїРёСЂРѕРІР°С‚СЊ РІ Р±СЌРєР°Рї вЂ” С†РµР»РµРІС‹Рµ С„Р°Р№Р»С‹ РЅРµ РЅР°Р№РґРµРЅС‹.'
-            : 'РЎРѕР·РґР°РЅРёРµ СЂРµР·РµСЂРІРЅРѕР№ РєРѕРїРёРё Р·Р°РІРµСЂС€РµРЅРѕ',
+            ? 'Нечего копировать в бэкап — целевые файлы не найдены.'
+            : 'Создание резервной копии завершено',
       );
     } catch (e) {
-      addLog('РћС€РёР±РєР° СЃРѕР·РґР°РЅРёСЏ Р±СЌРєР°РїР°: $e');
+      addLog('Ошибка создания бэкапа: $e');
       rethrow;
     }
   }
@@ -418,7 +419,7 @@ class LauncherController extends ChangeNotifier {
         : _backupFilesAndroid;
     if (Platform.isAndroid) {
       if (!isShizukuActive) {
-        addLog('Shizuku РЅРµ Р°РєС‚РёРІРµРЅ вЂ” СЃРѕР·РґР°РЅРёРµ Р±СЌРєР°РїР° РЅР° Android РЅРµРІРѕР·РјРѕР¶РЅРѕ');
+        addLog('Shizuku не активен — создание бэкапа на Android невозможно');
         throw Exception('Shizuku required for Android backup');
       }
       await _ensureFileService();
@@ -437,34 +438,34 @@ class LauncherController extends ChangeNotifier {
       if (Platform.isWindows) {
         final srcFile = File(src);
         if (!await srcFile.exists()) {
-          addLog('РСЃС…РѕРґРЅС‹Р№ С„Р°Р№Р» РЅРµ РЅР°Р№РґРµРЅ, РїСЂРѕРїСѓСЃРє: $src');
+          addLog('Исходный файл не найден, пропуск: $src');
           continue;
         }
         final dstFile = File(dst);
         await dstFile.parent.create(recursive: true);
         await srcFile.copy(dst);
-        addLog('РЎРєРѕРїРёСЂРѕРІР°РЅРѕ РІ Р±СЌРєР°Рї: $rel');
+        addLog('Скопировано в бэкап: $rel');
       } else if (Platform.isAndroid) {
         final srcExists = await _fsExists(src);
         if (!srcExists) {
-          addLog('РСЃС…РѕРґРЅС‹Р№ С„Р°Р№Р» РЅРµ РЅР°Р№РґРµРЅ, РїСЂРѕРїСѓСЃРє (Android): $src');
+          addLog('Исходный файл не найден, пропуск (Android): $src');
           continue;
         }
         await _fsCopyFile(src, dst);
-        addLog('Shizuku: СЃРєРѕРїРёСЂРѕРІР°РЅ РІ Р±СЌРєР°РїРµ: $rel');
+        addLog('Shizuku: скопирован в бэкапе: $rel');
       }
     }
 
-    addLog('РЎРѕР·РґР°РЅРёРµ СЂРµР·РµСЂРІРЅРѕР№ РєРѕРїРёРё Р·Р°РІРµСЂС€РµРЅРѕ');
+    addLog('Создание резервной копии завершено');
   }
 
   Future<void> restoreBackup() async {
-    addLog('Р’РѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёРµ РёР· Р±СЌРєР°РїР°...');
+    addLog('Восстановление из бэкапа...');
     final backupDirPath = _backupFolderName();
     try {
       if (Platform.isAndroid) {
         if (!isShizukuActive) {
-          addLog('Shizuku РЅРµ Р°РєС‚РёРІРµРЅ вЂ” РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёРµ РЅР° Android РЅРµРІРѕР·РјРѕР¶РЅРѕ');
+          addLog('Shizuku не активен — восстановление на Android невозможно');
           throw Exception('Shizuku required for Android restore');
         }
         await _ensureFileService();
@@ -481,21 +482,21 @@ class LauncherController extends ChangeNotifier {
         if (Platform.isWindows) {
           final srcFile = File(src);
           if (!await srcFile.exists()) {
-            addLog('Р’ Р±СЌРєР°РїРµ РЅРµ РЅР°Р№РґРµРЅ С„Р°Р№Р», РїСЂРѕРїСѓСЃРє: $src');
+            addLog('В бэкапе не найден файл, пропуск: $src');
             continue;
           }
           await File(dst).parent.create(recursive: true);
           await srcFile.copy(dst);
-          addLog('Р’РѕСЃСЃС‚Р°РЅРѕРІР»РµРЅ С„Р°Р№Р»: $rel');
+          addLog('Восстановлен файл: $rel');
         } else if (Platform.isAndroid) {
           final srcExists = await _fsExists(src);
           if (!srcExists) {
-            addLog('Р’ Р±СЌРєР°РїРµ РЅРµ РЅР°Р№РґРµРЅ С„Р°Р№Р», РїСЂРѕРїСѓСЃРє (Android): $src');
+            addLog('В бэкапе не найден файл, пропуск (Android): $src');
             continue;
           }
 
           await _fsCopyFile(src, dst);
-          addLog('Shizuku: РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅ С„Р°Р№Р»: $rel');
+          addLog('Shizuku: восстановлен файл: $rel');
         }
       }
 
@@ -505,21 +506,21 @@ class LauncherController extends ChangeNotifier {
           if (exists) {
             final ok = await _fsDeleteRecursive(backupDirPath);
             if (ok) {
-              addLog('РџР°РїРєР° Р±СЌРєР°РїР° СѓРґР°Р»РµРЅР° (Shizuku)');
+              addLog('Папка бэкапа удалена (Shizuku)');
             } else {
-              addLog('РќРµ СѓРґР°Р»РѕСЃСЊ СѓРґР°Р»РёС‚СЊ РїР°РїРєСѓ Р±СЌРєР°РїР° С‡РµСЂРµР· Shizuku');
+              addLog('Не удалось удалить папку бэкапа через Shizuku');
             }
           }
         } catch (e) {
           addLog(
-            'РќРµ СѓРґР°Р»РѕСЃСЊ СѓРґР°Р»РёС‚СЊ РїР°РїРєСѓ Р±СЌРєР°РїР° С‡РµСЂРµР· Shizuku: ${e.toString()}',
+            'Не удалось удалить папку бэкапа через Shizuku: ${e.toString()}',
           );
         }
       } else {
         final backupDir = Directory(backupDirPath);
         if (await backupDir.exists()) {
           await backupDir.delete(recursive: true);
-          addLog('РџР°РїРєР° Р±СЌРєР°РїР° СѓРґР°Р»РµРЅР°');
+          addLog('Папка бэкапа удалена');
         }
       }
 
@@ -527,22 +528,22 @@ class LauncherController extends ChangeNotifier {
       await prefs.setString('installed_version', 'v0.0.0');
       currentVersion = 'v0.0.0';
       hasUpdate = false;
-      statusText = 'Р СѓСЃРёС„РёРєР°С‚РѕСЂ СѓРґР°Р»С‘РЅ. РЎРѕСЃС‚РѕСЏРЅРёРµ: РќРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅРѕ.';
-      addLog('Р’РѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёРµ Р·Р°РІРµСЂС€РµРЅРѕ. Р’РµСЂСЃРёСЏ СЃР±СЂРѕС€РµРЅР°.');
+      statusText = 'Русификатор удалён. Состояние: Не установлено.';
+      addLog('Восстановление завершено. Версия сброшена.');
       notifyListeners();
     } catch (e) {
-      addLog('РћС€РёР±РєР° РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёСЏ: $e');
+      addLog('Ошибка восстановления: $e');
       rethrow;
     }
   }
 
   Future<void> restoreBackupKind(String kind) async {
-    addLog('Р’РѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёРµ РёР· Р±СЌРєР°РїР° (РїРѕРґРІРёРґ: $kind)...');
+    addLog('Восстановление из бэкапа (подвид: $kind)...');
     final backupDirPath = _backupFolderName();
     try {
       if (Platform.isAndroid) {
         if (!isShizukuActive) {
-          addLog('Shizuku РЅРµ Р°РєС‚РёРІРµРЅ вЂ” РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёРµ РЅР° Android РЅРµРІРѕР·РјРѕР¶РЅРѕ');
+          addLog('Shizuku не активен — восстановление на Android невозможно');
           throw Exception('Shizuku required for Android restore');
         }
         await _ensureFileService();
@@ -571,7 +572,7 @@ class LauncherController extends ChangeNotifier {
       }
 
       if (toRestore.isEmpty) {
-        addLog('Р’ Р±СЌРєР°РїРµ РЅРµ РЅР°Р№РґРµРЅС‹ С„Р°Р№Р»С‹ РґР»СЏ РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёСЏ (kind=$kind).');
+        addLog('В бэкапе не найдены файлы для восстановления (kind=$kind).');
         throw Exception('No backup files found for restore');
       }
 
@@ -582,20 +583,20 @@ class LauncherController extends ChangeNotifier {
         if (Platform.isWindows) {
           final srcFile = File(src);
           if (!await srcFile.exists()) {
-            addLog('Р’ Р±СЌРєР°РїРµ РЅРµ РЅР°Р№РґРµРЅ С„Р°Р№Р», РїСЂРѕРїСѓСЃРє: $src');
+            addLog('В бэкапе не найден файл, пропуск: $src');
             continue;
           }
           await File(dst).parent.create(recursive: true);
           await srcFile.copy(dst);
-          addLog('Р’РѕСЃСЃС‚Р°РЅРѕРІР»РµРЅ С„Р°Р№Р»: $rel');
+          addLog('Восстановлен файл: $rel');
         } else if (Platform.isAndroid) {
           final srcExists = await _fsExists(src);
           if (!srcExists) {
-            addLog('Р’ Р±СЌРєР°РїРµ РЅРµ РЅР°Р№РґРµРЅ С„Р°Р№Р», РїСЂРѕРїСѓСЃРє (Android): $src');
+            addLog('В бэкапе не найден файл, пропуск (Android): $src');
             continue;
           }
           await _fsCopyFile(src, dst);
-          addLog('Shizuku: РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅ С„Р°Р№Р»: $rel');
+          addLog('Shizuku: восстановлен файл: $rel');
         }
       }
 
@@ -605,21 +606,21 @@ class LauncherController extends ChangeNotifier {
           if (exists) {
             final ok = await _fsDeleteRecursive(backupDirPath);
             if (ok) {
-              addLog('РџР°РїРєР° Р±СЌРєР°РїР° СѓРґР°Р»РµРЅР° (Shizuku)');
+              addLog('Папка бэкапа удалена (Shizuku)');
             } else {
-              addLog('РќРµ СѓРґР°Р»РѕСЃСЊ СѓРґР°Р»РёС‚СЊ РїР°РїРєСѓ Р±СЌРєР°РїР° С‡РµСЂРµР· Shizuku');
+              addLog('Не удалось удалить папку бэкапа через Shizuku');
             }
           }
         } catch (e) {
           addLog(
-            'РќРµ СѓРґР°Р»РѕСЃСЊ СѓРґР°Р»РёС‚СЊ РїР°РїРєСѓ Р±СЌРєР°РїР° С‡РµСЂРµР· Shizuku: ${e.toString()}',
+            'Не удалось удалить папку бэкапа через Shizuku: ${e.toString()}',
           );
         }
       } else {
         final backupDirLocal = Directory(backupDirPath);
         if (await backupDirLocal.exists()) {
           await backupDirLocal.delete(recursive: true);
-          addLog('РџР°РїРєР° Р±СЌРєР°РїР° СѓРґР°Р»РµРЅР°');
+          addLog('Папка бэкапа удалена');
         }
       }
 
@@ -628,12 +629,12 @@ class LauncherController extends ChangeNotifier {
         await prefs.setString('installed_art_version', 'v0.0.0');
         currentArtVersion = 'v0.0.0';
         hasArtUpdate = false;
-        statusText = 'Р СѓСЃРёС„РёРєР°С‚РѕСЂ РіСЂР°С„РёРєРё СѓРґР°Р»С‘РЅ. РЎРѕСЃС‚РѕСЏРЅРёРµ: РќРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅРѕ.';
+        statusText = 'Русификатор графики удалён. Состояние: Не установлено.';
       } else if (kind == 'text') {
         await prefs.setString('installed_version', 'v0.0.0');
         currentVersion = 'v0.0.0';
         hasUpdate = false;
-        statusText = 'Р СѓСЃРёС„РёРєР°С‚РѕСЂ С‚РµРєСЃС‚Р° СѓРґР°Р»С‘РЅ. РЎРѕСЃС‚РѕСЏРЅРёРµ: РќРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅРѕ.';
+        statusText = 'Русификатор текста удалён. Состояние: Не установлено.';
       } else {
         await prefs.setString('installed_version', 'v0.0.0');
         await prefs.setString('installed_art_version', 'v0.0.0');
@@ -641,13 +642,13 @@ class LauncherController extends ChangeNotifier {
         currentArtVersion = 'v0.0.0';
         hasUpdate = false;
         hasArtUpdate = false;
-        statusText = 'Р СѓСЃРёС„РёРєР°С‚РѕСЂ СѓРґР°Р»С‘РЅ РїРѕР»РЅРѕСЃС‚СЊСЋ. РЎРѕСЃС‚РѕСЏРЅРёРµ: РќРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅРѕ.';
+        statusText = 'Русификатор удалён полностью. Состояние: Не установлено.';
       }
 
-      addLog('Р’РѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёРµ Р·Р°РІРµСЂС€РµРЅРѕ. Р’РµСЂСЃРёРё СЃР±СЂРѕС€РµРЅС‹.');
+      addLog('Восстановление завершено. Версии сброшены.');
       notifyListeners();
     } catch (e) {
-      addLog('РћС€РёР±РєР° РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёСЏ: $e');
+      addLog('Ошибка восстановления: $e');
       rethrow;
     }
   }
@@ -718,8 +719,9 @@ class LauncherController extends ChangeNotifier {
     return null;
   }
 
-  /// Free tier: `*_pc_free.zip` / `*_android_free.zip` from SOLIDLEAF-TEAM.
-  /// Premium tier: `*_pc_full.zip` / `*_android_full.zip` from FrauxHD/PREMIUM.
+  /// Public GitHub currently ships free text packs as
+  /// `1.5.0.19_pc_free.zip` / `1.5.0.19_android_free.zip`. Prefer `*_full.zip`
+  /// when present, then `*_free.zip`, then any non-art zip for this platform.
   Map<String, dynamic>? _pickTextAsset(List<Map<String, dynamic>> assets) {
     final platformKey = _platformAssetKey;
     if (isPremium) {
@@ -739,6 +741,7 @@ class LauncherController extends ChangeNotifier {
     );
   }
 
+
   /// Premium art packs: `*_pc_art.zip` / `*_android_art.zip`.
   Map<String, dynamic>? _pickArtAsset(List<Map<String, dynamic>> assets) {
     final platformKey = _platformAssetKey;
@@ -757,17 +760,16 @@ class LauncherController extends ChangeNotifier {
     final name = (asset['name'] ?? '').toString();
     final verMatch = RegExp(r'(\d+(?:\.\d+)*)').firstMatch(name);
     if (verMatch != null) return 'v${verMatch.group(1)}';
-    return (release['tag_name'] ?? release['name'] ?? remoteArtVersion)
-        .toString();
+    return (release['tag_name'] ?? release['name'] ?? 'v0.0.0').toString();
   }
 
   Future<void> checkForUpdates() async {
     try {
-      statusText = 'РџСЂРѕРІРµСЂРєР° РѕР±РЅРѕРІР»РµРЅРёР№...';
+      statusText = 'Проверка обновлений...';
       addLog('Запрос GitHub Releases ($_activeReleaseRepoLabel)...');
       final data = await _fetchLatestRelease(force: true);
       final version = (data['tag_name'] ?? data['name'] ?? 'v0.0.0').toString();
-      final body = (data['body'] ?? 'Р‘РµР· СЃРїРёСЃРєР° РёР·РјРµРЅРµРЅРёР№').toString();
+      final body = (data['body'] ?? 'Без списка изменений').toString();
       final assets = _releaseAssets(data);
       final zipAsset = _pickTextAsset(assets);
 
@@ -777,9 +779,9 @@ class LauncherController extends ChangeNotifier {
       if (zipAsset == null) {
         hasUpdate = false;
         final names = assets.map((a) => (a['name'] ?? '').toString()).join(', ');
-        statusText = 'РђСЂС…РёРІ С‚РµРєСЃС‚Р° РґР»СЏ РІР°С€РµР№ РїР»Р°С‚С„РѕСЂРјС‹ РЅРµ РЅР°Р№РґРµРЅ РІ СЂРµР»РёР·Рµ';
+        statusText = 'Архив текста для вашей платформы не найден в релизе';
         addLog(statusText);
-        addLog('Р¤Р°Р№Р»С‹ РІ СЂРµР»РёР·Рµ: ${names.isEmpty ? '(РїСѓСЃС‚Рѕ)' : names}');
+        addLog('Файлы в релизе: ${names.isEmpty ? '(пусто)' : names}');
         notifyListeners();
         return;
       }
@@ -789,19 +791,19 @@ class LauncherController extends ChangeNotifier {
       final isNewer = _isVersionNewer(remoteVersion, currentVersion);
       hasUpdate = isNewer;
       statusText = isNewer
-          ? 'Р”РѕСЃС‚СѓРїРЅРѕ РѕР±РЅРѕРІР»РµРЅРёРµ'
-          : 'РЈСЃС‚Р°РЅРѕРІР»РµРЅР° Р°РєС‚СѓР°Р»СЊРЅР°СЏ РІРµСЂСЃРёСЏ';
-      addLog('Р’РµСЂСЃРёСЏ РЅР° СЃРµСЂРІРµСЂРµ: $remoteVersion');
-      addLog('Р›РѕРєР°Р»СЊРЅР°СЏ РІРµСЂСЃРёСЏ: $currentVersion');
-      addLog('РђСЂС…РёРІ С‚РµРєСЃС‚Р°: $zipName');
-      addLog('РЎСЃС‹Р»РєР° РЅР° Р°СЂС…РёРІ: $zipUrl');
+          ? 'Доступно обновление'
+          : 'Установлена актуальная версия';
+      addLog('Версия на сервере: $remoteVersion');
+      addLog('Локальная версия: $currentVersion');
+      addLog('Архив текста: $zipName');
+      addLog('Ссылка на архив: $zipUrl');
       notifyListeners();
     } on TimeoutException catch (_) {
-      statusText = 'РџСЂРµРІС‹С€РµРЅРѕ РІСЂРµРјСЏ РѕР¶РёРґР°РЅРёСЏ СЃРµСЂРІРµСЂР°';
+      statusText = 'Превышено время ожидания сервера';
       addLog(statusText);
       notifyListeners();
     } on SocketException catch (_) {
-      statusText = 'РќРµС‚ РїРѕРґРєР»СЋС‡РµРЅРёСЏ Рє РёРЅС‚РµСЂРЅРµС‚Сѓ';
+      statusText = 'Нет подключения к интернету';
       addLog(statusText);
       notifyListeners();
     } on DioException catch (error) {
@@ -838,33 +840,34 @@ class LauncherController extends ChangeNotifier {
 
       hasArtUpdate = _isVersionNewer(remoteArtVersion, currentArtVersion);
       addLog(
-        'Р’РµСЂСЃРёСЏ С‚РµРєСЃС‚СѓСЂ РЅР° СЃРµСЂРІРµСЂРµ: $remoteArtVersion, Р»РѕРєР°Р»СЊРЅРѕ: $currentArtVersion',
+        'Версия текстур на сервере: $remoteArtVersion, локально: $currentArtVersion',
       );
       notifyListeners();
     } catch (e) {
-      addLog('РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕРІРµСЂРёС‚СЊ РІРµСЂСЃРёСЋ С‚РµРєСЃС‚СѓСЂ: $e');
+      addLog('Не удалось проверить версию текстур: $e');
     }
   }
 
+
   Future<void> selectInstallPath() async {
     final selected = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: 'Р’С‹Р±РµСЂРёС‚Рµ РїР°РїРєСѓ СѓСЃС‚Р°РЅРѕРІРєРё',
+      dialogTitle: 'Выберите папку установки',
     );
     if (selected != null && selected.isNotEmpty) {
       installPath = selected;
-      addLog('Р’С‹Р±СЂР°РЅР° РїР°РїРєР°: $installPath');
+      addLog('Выбрана папка: $installPath');
       notifyListeners();
     }
   }
 
   Future<void> installOrUpdate() async {
-    if (remoteVersion == 'вЂ”') {
+    if (remoteVersion == '—') {
       await checkForUpdates();
     }
 
     if (!hasUpdate && currentVersion != 'v0.0.0') {
-      addLog('РћР±РЅРѕРІР»РµРЅРёР№ РЅРµ С‚СЂРµР±СѓРµС‚СЃСЏ. РЈСЃС‚Р°РЅРѕРІРєР° СѓР¶Рµ Р°РєС‚СѓР°Р»СЊРЅР°.');
-      statusText = 'РЈСЃС‚Р°РЅРѕРІР»РµРЅР° Р°РєС‚СѓР°Р»СЊРЅР°СЏ РІРµСЂСЃРёСЏ';
+      addLog('Обновлений не требуется. Установка уже актуальна.');
+      statusText = 'Установлена актуальная версия';
       notifyListeners();
       return;
     }
@@ -884,6 +887,7 @@ class LauncherController extends ChangeNotifier {
     final asset = await _getArtAsset();
     await _downloadAndInstallReleaseAsset(asset, kind: 'art');
   }
+
 
   Future<void> _downloadAndInstallReleaseAsset(
     Map<String, dynamic> asset, {
@@ -929,13 +933,13 @@ class LauncherController extends ChangeNotifier {
           final progress = received / total;
           downloadProgress = progress;
           statusText = kind == 'art'
-              ? 'Р—Р°РіСЂСѓР·РєР° С‚РµРєСЃС‚СѓСЂ: ${(progress * 100).toStringAsFixed(0)}%'
-              : 'Р—Р°РіСЂСѓР·РєР°: ${(progress * 100).toStringAsFixed(0)}%';
+              ? 'Загрузка текстур: ${(progress * 100).toStringAsFixed(0)}%'
+              : 'Загрузка: ${(progress * 100).toStringAsFixed(0)}%';
           notifyListeners();
         },
       );
 
-      addLog('РђСЂС…РёРІ Р·Р°РіСЂСѓР¶РµРЅ: $zipPath');
+      addLog('Архив загружен: $zipPath');
       await _extractArchive(zipPath, installPath, archiveKind: kind);
 
       final prefs = await SharedPreferences.getInstance();
@@ -952,12 +956,12 @@ class LauncherController extends ChangeNotifier {
       isDownloading = false;
       downloadProgress = 1;
       statusText = kind == 'art'
-          ? 'РЈСЃС‚Р°РЅРѕРІРєР° С‚РµРєСЃС‚СѓСЂ Р·Р°РІРµСЂС€РµРЅР°'
-          : 'РЈСЃС‚Р°РЅРѕРІРєР° Р·Р°РІРµСЂС€РµРЅР°';
+          ? 'Установка текстур завершена'
+          : 'Установка завершена';
       addLog(
         kind == 'art'
-            ? 'РЈСЃС‚Р°РЅРѕРІРєР° РіСЂР°С„РёРєРё Рё С‚РµРєСЃС‚СѓСЂ Р·Р°РІРµСЂС€РµРЅР°.'
-            : 'Р Р°Р·РІС‘СЂС‚С‹РІР°РЅРёРµ С„Р°Р№Р»РѕРІ Р·Р°РєРѕРЅС‡РµРЅРѕ.',
+            ? 'Установка графики и текстур завершена.'
+            : 'Развёртывание файлов закончено.',
       );
       notifyListeners();
     } on DioException catch (error) {
@@ -965,7 +969,7 @@ class LauncherController extends ChangeNotifier {
       _handleDioError(error);
     } catch (error) {
       isDownloading = false;
-      final message = 'РћС€РёР±РєР° СѓСЃС‚Р°РЅРѕРІРєРё: ${error.toString()}';
+      final message = 'Ошибка установки: ${error.toString()}';
       statusText = message;
       addLog(message);
       notifyListeners();
@@ -1016,7 +1020,7 @@ class LauncherController extends ChangeNotifier {
   }) async {
     if (Platform.isAndroid) {
       if (!isShizukuActive) {
-        addLog('Shizuku РЅРµ Р°РєС‚РёРІРµРЅ вЂ” СѓСЃС‚Р°РЅРѕРІРєР° РЅР° Android РЅРµРІРѕР·РјРѕР¶РЅР°');
+        addLog('Shizuku не активен — установка на Android невозможна');
         throw Exception('Shizuku required for Android install');
       }
       await _ensureFileService();
@@ -1102,20 +1106,20 @@ class LauncherController extends ChangeNotifier {
             copied++;
           } catch (e) {
             firstError ??= e.toString();
-            addLog('РќРµ СѓРґР°Р»РѕСЃСЊ СЃРєРѕРїРёСЂРѕРІР°С‚СЊ ${f.path} -> $dst: ${e.toString()}');
+            addLog('Не удалось скопировать ${f.path} -> $dst: ${e.toString()}');
           }
         }
 
         if (copied == 0 && allFiles.isNotEmpty) {
           throw Exception(
-            'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРєРѕРїРёСЂРѕРІР°С‚СЊ РЅРё РѕРґРЅРѕРіРѕ С„Р°Р№Р»Р° С‡РµСЂРµР· Shizuku${firstError != null ? ': $firstError' : ''}',
+            'Не удалось скопировать ни одного файла через Shizuku${firstError != null ? ': $firstError' : ''}',
           );
         }
 
         final validated = await _fsExists(finalTarget);
         if (!validated) {
           throw Exception(
-            'РџРѕСЃР»Рµ РєРѕРїРёСЂРѕРІР°РЅРёСЏ С†РµР»РµРІР°СЏ РїР°РїРєР° РЅРµ РЅР°Р№РґРµРЅР°: $finalTarget',
+            'После копирования целевая папка не найдена: $finalTarget',
           );
         }
 
@@ -1123,17 +1127,17 @@ class LauncherController extends ChangeNotifier {
         lastInstallTarget = finalTarget;
         lastInstallFileCount = copied;
       } catch (e) {
-        addLog('РћС€РёР±РєР° СЂР°СЃРїР°РєРѕРІРєРё/РєРѕРїРёСЂРѕРІР°РЅРёСЏ Р°СЂС…РёРІР°: ${e.toString()}');
+        addLog('Ошибка распаковки/копирования архива: ${e.toString()}');
         rethrow;
       } finally {
         try {
           if (await workDir.exists()) {
             await workDir.delete(recursive: true);
-            addLog('Р’СЂРµРјРµРЅРЅР°СЏ РїР°РїРєР° СѓСЃС‚Р°РЅРѕРІРєРё СѓРґР°Р»РµРЅР°: ${workDir.path}');
+            addLog('Временная папка установки удалена: ${workDir.path}');
           }
         } catch (e) {
           addLog(
-            'РќРµ СѓРґР°Р»РѕСЃСЊ СѓРґР°Р»РёС‚СЊ РІСЂРµРјРµРЅРЅСѓСЋ РїР°РїРєСѓ СѓСЃС‚Р°РЅРѕРІРєРё: ${e.toString()}',
+            'Не удалось удалить временную папку установки: ${e.toString()}',
           );
         }
       }
@@ -1219,14 +1223,14 @@ class LauncherController extends ChangeNotifier {
       final result =
           await methodChannel.invokeMethod<bool>('checkShizukuStatus') ?? false;
       isShizukuActive = result;
-      statusText = result ? 'Shizuku Р°РєС‚РёРІРµРЅ' : 'Shizuku РЅРµ Р°РєС‚РёРІРµРЅ';
-      addLog(result ? 'Shizuku РґРѕСЃС‚СѓРїРµРЅ' : 'Shizuku РЅРµРґРѕСЃС‚СѓРїРµРЅ');
+      statusText = result ? 'Shizuku активен' : 'Shizuku не активен';
+      addLog(result ? 'Shizuku доступен' : 'Shizuku недоступен');
       notifyListeners();
       return result;
     } on PlatformException catch (error) {
       isShizukuActive = false;
       addLog(
-        'РџСЂРѕРІРµСЂРєР° Shizuku Р·Р°РІРµСЂС€РёР»Р°СЃСЊ РѕС€РёР±РєРѕР№: ${error.message ?? 'unknown'}',
+        'Проверка Shizuku завершилась ошибкой: ${error.message ?? 'unknown'}',
       );
       notifyListeners();
       return false;
@@ -1266,20 +1270,20 @@ class LauncherController extends ChangeNotifier {
   }
 
   void _handleDioError(DioException exception) {
-    String message = 'РќРµ СѓРґР°Р»РѕСЃСЊ РІС‹РїРѕР»РЅРёС‚СЊ Р·Р°РїСЂРѕСЃ';
+    String message = 'Не удалось выполнить запрос';
 
     if (exception.type == DioExceptionType.connectionTimeout) {
-      message = 'РўР°Р№РјР°СѓС‚ СЃРѕРµРґРёРЅРµРЅРёСЏ. РџСЂРѕРІРµСЂСЊС‚Рµ РёРЅС‚РµСЂРЅРµС‚-РїРѕРґРєР»СЋС‡РµРЅРёРµ.';
+      message = 'Таймаут соединения. Проверьте интернет-подключение.';
     } else if (exception.type == DioExceptionType.receiveTimeout) {
-      message = 'РЎРµСЂРІРµСЂ РґРѕР»РіРѕ РѕС‚РІРµС‡Р°РµС‚.';
+      message = 'Сервер долго отвечает.';
     } else if (exception.type == DioExceptionType.connectionError) {
-      message = 'РќРµС‚ РёРЅС‚РµСЂРЅРµС‚-СЃРѕРµРґРёРЅРµРЅРёСЏ РёР»Рё СЃРµСЂРІРµСЂ РЅРµРґРѕСЃС‚СѓРїРµРЅ.';
+      message = 'Нет интернет-соединения или сервер недоступен.';
     } else if (exception.response?.statusCode == 401) {
-      message = 'GitHub РѕС‚РєР»РѕРЅРёР» Р·Р°РїСЂРѕСЃ. РџРѕРІС‚РѕСЂРёС‚Рµ РїСЂРѕРІРµСЂРєСѓ Р±РµР· Р»РёС€РЅРµРіРѕ С‚РѕРєРµРЅР°.';
+      message = 'GitHub отклонил запрос. Повторите проверку без лишнего токена.';
     } else if (exception.response?.statusCode == 403) {
-      message = 'GitHub API РѕРіСЂР°РЅРёС‡РёР» С‡РёСЃР»Рѕ Р·Р°РїСЂРѕСЃРѕРІ. РџРѕРїСЂРѕР±СѓР№С‚Рµ РїРѕР·Р¶Рµ.';
+      message = 'GitHub API ограничил число запросов. Попробуйте позже.';
     } else if (exception.response?.statusCode == 404) {
-      message = 'Р РµР»РёР· РЅРµ РЅР°Р№РґРµРЅ. РџСЂРѕРІРµСЂСЊС‚Рµ СЂРµРїРѕР·РёС‚РѕСЂРёР№ SOLIDLEAF-TEAM.';
+      message = 'Релиз не найден. Проверьте репозиторий SOLIDLEAF-TEAM.';
     } else if (exception.error != null) {
       message = exception.error.toString();
     }

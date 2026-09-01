@@ -1,4 +1,4 @@
-﻿// ignore_for_file: use_build_context_synchronously
+// ignore_for_file: use_build_context_synchronously
 
 import 'dart:io';
 
@@ -30,7 +30,7 @@ class _MainScreenState extends State<MainScreen> {
     final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!opened && mounted && messenger != null) {
       messenger.showSnackBar(
-        SnackBar(content: Text('РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РєСЂС‹С‚СЊ СЃСЃС‹Р»РєСѓ: $url')),
+        SnackBar(content: Text('Не удалось открыть ссылку: $url')),
       );
     }
   }
@@ -67,13 +67,13 @@ class _MainScreenState extends State<MainScreen> {
             builder: (ctx) => AlertDialog(
               backgroundColor: Theme.of(context).cardColor,
               title: Text(
-                'РЈСЃС‚Р°РЅРѕРІРєР° СѓСЃРїРµС€РЅРѕ Р·Р°РІРµСЂС€РµРЅР°',
+                'Установка успешно завершена',
                 style: TextStyle(
                   color: Theme.of(context).textTheme.bodyMedium?.color,
                 ),
               ),
               content: Text(
-                'РћС‚РєСѓРґР°: $src\nРљСѓРґР°: $tgt\nРЎРєРѕРїРёСЂРѕРІР°РЅРѕ С„Р°Р№Р»РѕРІ: $count',
+                'Откуда: $src\nКуда: $tgt\nСкопировано файлов: $count',
                 style: TextStyle(
                   color: Theme.of(context).textTheme.bodySmall?.color,
                 ),
@@ -81,7 +81,7 @@ class _MainScreenState extends State<MainScreen> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(ctx).pop(),
-                  child: const Text('РћРљ'),
+                  child: const Text('ОК'),
                 ),
               ],
             ),
@@ -108,13 +108,13 @@ class _MainScreenState extends State<MainScreen> {
             builder: (ctx) => AlertDialog(
               backgroundColor: Theme.of(context).cardColor,
               title: Text(
-                'РўРµРєСЃС‚СѓСЂС‹ СѓСЃС‚Р°РЅРѕРІР»РµРЅС‹',
+                'Текстуры установлены',
                 style: TextStyle(
                   color: Theme.of(context).textTheme.bodyMedium?.color,
                 ),
               ),
               content: Text(
-                'РћС‚РєСѓРґР°: $src\nРљСѓРґР°: $tgt\nРЎРєРѕРїРёСЂРѕРІР°РЅРѕ С„Р°Р№Р»РѕРІ: $count',
+                'Откуда: $src\nКуда: $tgt\nСкопировано файлов: $count',
                 style: TextStyle(
                   color: Theme.of(context).textTheme.bodySmall?.color,
                 ),
@@ -122,7 +122,7 @@ class _MainScreenState extends State<MainScreen> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(ctx).pop(),
-                  child: const Text('РћРљ'),
+                  child: const Text('ОК'),
                 ),
               ],
             ),
@@ -139,7 +139,7 @@ class _MainScreenState extends State<MainScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: Theme.of(context).cardColor,
         title: Text(
-          'Р’С‹Р±РѕСЂ СѓСЃС‚Р°РЅРѕРІРєРё',
+          'Выбор установки',
           style: TextStyle(
             color: Theme.of(context).textTheme.bodyMedium?.color,
           ),
@@ -148,7 +148,7 @@ class _MainScreenState extends State<MainScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'Р’С‹Р±РµСЂРёС‚Рµ, С‡С‚Рѕ РІС‹ С…РѕС‚РёС‚Рµ СѓСЃС‚Р°РЅРѕРІРёС‚СЊ:',
+              'Выберите, что вы хотите установить:',
               style: TextStyle(
                 color: Theme.of(context).textTheme.bodyMedium?.color,
               ),
@@ -156,19 +156,19 @@ class _MainScreenState extends State<MainScreen> {
             const SizedBox(height: 12),
             ElevatedButton(
               onPressed: () => Navigator.of(ctx).pop('text'),
-              child: const Text('Р СѓСЃРёС„РёРєР°С†РёСЏ С‚РµРєСЃС‚Р°'),
+              child: const Text('Русификация текста'),
             ),
             const SizedBox(height: 8),
             ElevatedButton(
               onPressed: () => Navigator.of(ctx).pop('art'),
-              child: const Text('Р СѓСЃРёС„РёРєР°С†РёСЏ С‚РµРєСЃС‚СѓСЂ'),
+              child: const Text('Русификация текстур'),
             ),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(null),
-            child: const Text('РћС‚РјРµРЅР°'),
+            child: const Text('Отмена'),
           ),
         ],
       ),
@@ -197,9 +197,9 @@ class _MainScreenState extends State<MainScreen> {
           ),
         ),
         content: Text(
-          'Р¤Р°РЅР°С‚СЃРєРёР№ РїСЂРѕРµРєС‚ Р»РѕРєР°Р»РёР·Р°С†РёРё.\n\n'
-          'Р¦РµР»СЊ вЂ” СЃРґРµР»Р°С‚СЊ РєРѕРјС„РѕСЂС‚РЅС‹Р№ Рё СѓРґРѕР±РЅС‹Р№ Р»Р°СѓРЅС‡РµСЂ РґР»СЏ СѓСЃС‚Р°РЅРѕРІРєРё Рё РѕР±РЅРѕРІР»РµРЅРёСЏ СЂСѓСЃРёС„РёРєР°С‚РѕСЂР°, '
-          'СЃРѕС…СЂР°РЅСЏСЏ СѓРґРѕР±СЃС‚РІРѕ РґР»СЏ РёРіСЂРѕРєРѕРІ Рё РїСЂРѕСЃС‚РѕС‚Сѓ РґР»СЏ РїРѕРґРґРµСЂР¶РєРё РїСЂРѕРµРєС‚Р°.',
+          'Фанатский проект локализации.\n\n'
+          'Цель — сделать комфортный и удобный лаунчер для установки и обновления русификатора, '
+          'сохраняя удобство для игроков и простоту для поддержки проекта.',
           style: TextStyle(
             color: Theme.of(context).textTheme.bodySmall?.color,
             height: 1.5,
@@ -208,7 +208,7 @@ class _MainScreenState extends State<MainScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Р—Р°РєСЂС‹С‚СЊ'),
+            child: const Text('Закрыть'),
           ),
         ],
       ),
@@ -239,10 +239,10 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  /// Compact banner showing the current Telegram account state ("РџСЂРµРјРёСѓРј
-  /// РґРѕСЃС‚СѓРї" / "РћР±С‹С‡РЅС‹Р№ РґРѕСЃС‚СѓРї") plus a "Р’С‹Р№С‚Рё" button. Since the launcher
+  /// Compact banner showing the current Telegram account state ("Премиум
+  /// доступ" / "Обычный доступ") plus a "Выйти" button. Since the launcher
   /// only reaches [MainScreen] after a successful login (see [AuthGate]),
-  /// this is always shown here вЂ” it doubles as a reminder of *why* the
+  /// this is always shown here — it doubles as a reminder of *why* the
   /// texture card may be locked (see [_showPremiumLockDialog]) and as the
   /// only way to end the session.
   Widget _buildAccountStatusBanner(LauncherController controller) {
@@ -254,7 +254,7 @@ class _MainScreenState extends State<MainScreen> {
     final icon = isPremium
         ? Icons.workspace_premium_rounded
         : Icons.person_rounded;
-    final label = isPremium ? 'РџСЂРµРјРёСѓРј РґРѕСЃС‚СѓРї' : 'РћР±С‹С‡РЅС‹Р№ РґРѕСЃС‚СѓРї';
+    final label = isPremium ? 'Премиум доступ' : 'Обычный доступ';
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -280,7 +280,7 @@ class _MainScreenState extends State<MainScreen> {
           TextButton.icon(
             onPressed: () => _handleLogout(controller),
             icon: const Icon(Icons.logout_rounded, size: 16),
-            label: const Text('Р’С‹Р№С‚Рё'),
+            label: const Text('Выйти'),
             style: TextButton.styleFrom(
               foregroundColor: Theme.of(context).textTheme.bodySmall?.color,
             ),
@@ -291,25 +291,25 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   /// Confirms, then clears the stored Telegram JWT and sends the user back
-  /// to the mandatory [LoginScreen] (via a fresh [AuthGate]) вЂ” consistent
+  /// to the mandatory [LoginScreen] (via a fresh [AuthGate]) — consistent
   /// with the "launcher requires login" rule enforced at startup.
   Future<void> _handleLogout(LauncherController controller) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1B1826),
-        title: const Text('Р’С‹Р№С‚Рё РёР· Р°РєРєР°СѓРЅС‚Р°?'),
+        title: const Text('Выйти из аккаунта?'),
         content: const Text(
-          'РџРѕРЅР°РґРѕР±РёС‚СЃСЏ СЃРЅРѕРІР° РІРѕР№С‚Рё С‡РµСЂРµР· Telegram, С‡С‚РѕР±С‹ РїСЂРѕРґРѕР»Р¶РёС‚СЊ РїРѕР»СЊР·РѕРІР°С‚СЊСЃСЏ Р»Р°СѓРЅС‡РµСЂРѕРј.',
+          'Понадобится снова войти через Telegram, чтобы продолжить пользоваться лаунчером.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('РћС‚РјРµРЅР°'),
+            child: const Text('Отмена'),
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Р’С‹Р№С‚Рё'),
+            child: const Text('Выйти'),
           ),
         ],
       ),
@@ -350,7 +350,7 @@ class _MainScreenState extends State<MainScreen> {
                     ? Brightness.dark
                     : Brightness.light,
                 title: Text(
-                  'SOLIDLEAF TEAM | Р›Р°СѓРЅС‡РµСЂ СЂСѓСЃРёС„РёРєР°С†РёР№',
+                  'SOLIDLEAF TEAM | Лаунчер русификаций',
                   style: TextStyle(
                     color: Theme.of(context).textTheme.bodySmall?.color,
                     fontSize: 12,
@@ -393,21 +393,21 @@ class _MainScreenState extends State<MainScreen> {
                 Icons.info_outline_rounded,
                 true,
                 onTap: _showProjectInfoDialog,
-                tooltip: 'Рћ РїСЂРѕРµРєС‚Рµ',
+                tooltip: 'О проекте',
               ),
               _navButton(
                 Icons.card_giftcard_rounded,
                 false,
                 onTap: _openGiftCodesPage,
-                tooltip: 'РџРѕРґР°СЂРѕС‡РЅС‹Рµ РєРѕРґС‹',
+                tooltip: 'Подарочные коды',
               ),
               _navButton(
                 isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
                 false,
                 onTap: controller.toggleTheme,
                 tooltip: isDark
-                    ? 'РџРµСЂРµРєР»СЋС‡РёС‚СЊ РЅР° СЃРІРµС‚Р»СѓСЋ С‚РµРјСѓ'
-                    : 'РџРµСЂРµРєР»СЋС‡РёС‚СЊ РЅР° С‚С‘РјРЅСѓСЋ С‚РµРјСѓ',
+                    ? 'Переключить на светлую тему'
+                    : 'Переключить на тёмную тему',
               ),
               const Spacer(),
               Padding(
@@ -446,7 +446,7 @@ class _MainScreenState extends State<MainScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Р‘РёР±Р»РёРѕС‚РµРєР°',
+                'Библиотека',
                 style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
@@ -456,10 +456,10 @@ class _MainScreenState extends State<MainScreen> {
               const SizedBox(height: 18),
               _buildGameListTile('Reverse: 1999', 'v 3.7.0', isActive: true),
 
-              // Spacer РІС‹С‚Р°Р»РєРёРІР°РµС‚ РІСЃРµ, С‡С‚Рѕ РїРѕРґ РЅРёРј, РІ СЃР°РјС‹Р№ РЅРёР· РєРѕРЅС‚РµР№РЅРµСЂР°
+              // Spacer выталкивает все, что под ним, в самый низ контейнера
               const Spacer(),
 
-              // Р’С‹РІРѕРґ РЅР°С€РµРіРѕ РЅРѕРІРѕРіРѕ РїР»РµРµСЂР°
+              // Вывод нашего нового плеера
               const MiniPlayer(),
             ],
           ),
@@ -532,7 +532,7 @@ class _MainScreenState extends State<MainScreen> {
                       ),
                       const SizedBox(height: 18),
                       Text(
-                        'РљРѕРјРїРѕРЅРµРЅС‚С‹',
+                        'Компоненты',
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
@@ -542,16 +542,16 @@ class _MainScreenState extends State<MainScreen> {
                       const SizedBox(height: 12),
                       _buildComponentTile(
                         icon: Icons.translate_rounded,
-                        title: 'РўРµРєСЃС‚РѕРІР°СЏ Р»РѕРєР°Р»РёР·Р°С†РёСЏ',
-                        subtitle: 'РџРµСЂРµРІРѕРґ СЃСЋР¶РµС‚Р° Рё РІРЅСѓС‚СЂРёРёРіСЂРѕРІС‹С… РјРµРЅСЋ',
+                        title: 'Текстовая локализация',
+                        subtitle: 'Перевод сюжета и внутриигровых меню',
                         trailing: _buildVersionBadge(controller),
                       ),
                       const SizedBox(height: 10),
                       _buildComponentTile(
                         icon: Icons.image_rounded,
-                        title: 'Р“СЂР°С„РёРєР° Рё С‚РµРєСЃС‚СѓСЂС‹',
-                        subtitle: 'Р›РѕРєР°Р»РёР·Р°С†РёСЏ РёРЅС‚РµСЂС„РµР№СЃР° Рё РіСЂР°С„РёС‡РµСЃРєРёС… С„Р°Р№Р»РѕРІ',
-                        // Locked (dimmed + gold "РќРµРґРѕСЃС‚СѓРїРЅРѕ" badge) until the
+                        title: 'Графика и текстуры',
+                        subtitle: 'Локализация интерфейса и графических файлов',
+                        // Locked (dimmed + gold "Недоступно" badge) until the
                         // user has active Telegram-channel premium access.
                         trailing: controller.isPremium
                             ? _buildArtVersionBadge(controller)
@@ -576,7 +576,7 @@ class _MainScreenState extends State<MainScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'РЎС‚Р°С‚СѓСЃ: ${controller.statusText}',
+                              'Статус: ${controller.statusText}',
                               style: TextStyle(
                                 fontWeight: FontWeight.w600,
                                 color: Theme.of(context)
@@ -648,7 +648,7 @@ class _MainScreenState extends State<MainScreen> {
                                     backgroundColor: Theme.of(context)
                                         .cardColor,
                                     title: Text(
-                                      'РЈРґР°Р»РёС‚СЊ/РІРѕСЃСЃС‚Р°РЅРѕРІРёС‚СЊ',
+                                      'Удалить/восстановить',
                                       style: TextStyle(
                                         color: Theme.of(context)
                                             .textTheme
@@ -660,7 +660,7 @@ class _MainScreenState extends State<MainScreen> {
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         Text(
-                                          'Р’С‹Р±РµСЂРёС‚Рµ, С‡С‚Рѕ РІС‹ С…РѕС‚РёС‚Рµ СѓРґР°Р»РёС‚СЊ РёР· СѓСЃС‚Р°РЅРѕРІРєРё:',
+                                          'Выберите, что вы хотите удалить из установки:',
                                           style: TextStyle(
                                             color: Theme.of(context)
                                                 .textTheme
@@ -673,7 +673,7 @@ class _MainScreenState extends State<MainScreen> {
                                           onPressed: () =>
                                               Navigator.of(ctx).pop('text'),
                                           child: const Text(
-                                            'РЈРґР°Р»РёС‚СЊ СЂСѓСЃРёС„РёРєР°С‚РѕСЂ С‚РµРєСЃС‚Р°',
+                                            'Удалить русификатор текста',
                                           ),
                                         ),
                                         const SizedBox(height: 8),
@@ -681,7 +681,7 @@ class _MainScreenState extends State<MainScreen> {
                                           onPressed: () =>
                                               Navigator.of(ctx).pop('art'),
                                           child: const Text(
-                                            'РЈРґР°Р»РёС‚СЊ СЂСѓСЃРёС„РёРєР°С‚РѕСЂ С‚РµРєСЃС‚СѓСЂ',
+                                            'Удалить русификатор текстур',
                                           ),
                                         ),
                                         const SizedBox(height: 8),
@@ -692,7 +692,7 @@ class _MainScreenState extends State<MainScreen> {
                                           onPressed: () =>
                                               Navigator.of(ctx).pop('all'),
                                           child: const Text(
-                                            'РЈРґР°Р»РёС‚СЊ РІСЃС‘',
+                                            'Удалить всё',
                                             style: TextStyle(
                                               color: Colors.white,
                                             ),
@@ -704,7 +704,7 @@ class _MainScreenState extends State<MainScreen> {
                                       TextButton(
                                         onPressed: () =>
                                             Navigator.of(ctx).pop(null),
-                                        child: const Text('РћС‚РјРµРЅР°'),
+                                        child: const Text('Отмена'),
                                       ),
                                     ],
                                   ),
@@ -723,7 +723,7 @@ class _MainScreenState extends State<MainScreen> {
                                     backgroundColor: Theme.of(context)
                                         .cardColor,
                                     title: Text(
-                                      'РџРѕРґС‚РІРµСЂРґРёС‚Рµ РґРµР№СЃС‚РІРёРµ',
+                                      'Подтвердите действие',
                                       style: TextStyle(
                                         color: Theme.of(context)
                                             .textTheme
@@ -732,11 +732,11 @@ class _MainScreenState extends State<MainScreen> {
                                       ),
                                     ),
                                     content: Text(
-                                      'Р’С‹ СѓРІРµСЂРµРЅС‹, С‡С‚Рѕ С…РѕС‚РёС‚Рµ РІС‹РїРѕР»РЅРёС‚СЊ РґРµР№СЃС‚РІРёРµ: ${choice == 'all'
-                                          ? 'РЈРґР°Р»РёС‚СЊ РІСЃС‘'
+                                      'Вы уверены, что хотите выполнить действие: ${choice == 'all'
+                                          ? 'Удалить всё'
                                           : choice == 'art'
-                                          ? 'РЈРґР°Р»РёС‚СЊ С‚РµРєСЃС‚СѓСЂС‹'
-                                          : 'РЈРґР°Р»РёС‚СЊ С‚РµРєСЃС‚'}?',
+                                          ? 'Удалить текстуры'
+                                          : 'Удалить текст'}?',
                                       style: TextStyle(
                                         color: Theme.of(context)
                                             .textTheme
@@ -748,12 +748,12 @@ class _MainScreenState extends State<MainScreen> {
                                       TextButton(
                                         onPressed: () =>
                                             Navigator.of(c2).pop(false),
-                                        child: const Text('РћС‚РјРµРЅР°'),
+                                        child: const Text('Отмена'),
                                       ),
                                       ElevatedButton(
                                         onPressed: () =>
                                             Navigator.of(c2).pop(true),
-                                        child: const Text('Р’С‹РїРѕР»РЅРёС‚СЊ'),
+                                        child: const Text('Выполнить'),
                                       ),
                                     ],
                                   ),
@@ -768,7 +768,7 @@ class _MainScreenState extends State<MainScreen> {
                                   messenger.showSnackBar(
                                     const SnackBar(
                                       content: Text(
-                                        'РћРїРµСЂР°С†РёСЏ СѓРґР°Р»РµРЅРёСЏ/РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёСЏ Р·Р°РІРµСЂС€РµРЅР°',
+                                        'Операция удаления/восстановления завершена',
                                       ),
                                     ),
                                   );
@@ -776,13 +776,13 @@ class _MainScreenState extends State<MainScreen> {
                                   if (!mounted || messenger == null) return;
                                   messenger.showSnackBar(
                                     SnackBar(
-                                      content: Text('РћС€РёР±РєР°: ${e.toString()}'),
+                                      content: Text('Ошибка: ${e.toString()}'),
                                     ),
                                   );
                                 }
                               },
                               child: Text(
-                                'РЈРґР°Р»РёС‚СЊ',
+                                'Удалить',
                                 style: TextStyle(
                                   color: Theme.of(context)
                                       .textTheme
@@ -809,8 +809,8 @@ class _MainScreenState extends State<MainScreen> {
                                   : () => _showInstallChoiceDialog(controller),
                               child: Text(
                                 controller.hasUpdate
-                                    ? 'РћР±РЅРѕРІРёС‚СЊ'
-                                    : 'РЈСЃС‚Р°РЅРѕРІРёС‚СЊ',
+                                    ? 'Обновить'
+                                    : 'Установить',
                                 style: const TextStyle(
                                   fontWeight: FontWeight.bold,
                                   color: Colors.white,
@@ -857,7 +857,7 @@ class _MainScreenState extends State<MainScreen> {
                         : Icons.dark_mode_rounded,
                   ),
                   onPressed: controller.toggleTheme,
-                  tooltip: 'РЎРјРµРЅРёС‚СЊ С‚РµРјСѓ',
+                  tooltip: 'Сменить тему',
                 ),
                 ElevatedButton.icon(
                   onPressed: controller.checkShizukuStatus,
@@ -888,8 +888,8 @@ class _MainScreenState extends State<MainScreen> {
                 children: [
                   Text(
                     controller.isShizukuActive
-                        ? 'РЎС‚Р°С‚СѓСЃ: Shizuku Р°РєС‚РёРІРµРЅ'
-                        : 'РЎС‚Р°С‚СѓСЃ: Shizuku РЅРµ Р°РєС‚РёРІРµРЅ',
+                        ? 'Статус: Shizuku активен'
+                        : 'Статус: Shizuku не активен',
                     style: TextStyle(
                       color: Theme.of(context).textTheme.bodySmall?.color,
                     ),
@@ -917,16 +917,16 @@ class _MainScreenState extends State<MainScreen> {
             const SizedBox(height: 16),
             _buildComponentTile(
               icon: Icons.translate_rounded,
-              title: 'РўРµРєСЃС‚РѕРІР°СЏ Р»РѕРєР°Р»РёР·Р°С†РёСЏ',
-              subtitle: 'РџРµСЂРµРІРѕРґ СЃСЋР¶РµС‚Р° Рё РІРЅСѓС‚СЂРёРёРіСЂРѕРІС‹С… РјРµРЅСЋ',
+              title: 'Текстовая локализация',
+              subtitle: 'Перевод сюжета и внутриигровых меню',
               trailing: _buildVersionBadge(controller),
             ),
             const SizedBox(height: 10),
             _buildComponentTile(
               icon: Icons.image_rounded,
-              title: 'Р“СЂР°С„РёРєР° Рё С‚РµРєСЃС‚СѓСЂС‹',
-              subtitle: 'Р›РѕРєР°Р»РёР·Р°С†РёСЏ РёРЅС‚РµСЂС„РµР№СЃР° Рё РіСЂР°С„РёС‡РµСЃРєРёС… С„Р°Р№Р»РѕРІ',
-              // Locked (dimmed + gold "РќРµРґРѕСЃС‚СѓРїРЅРѕ" badge) until the user
+              title: 'Графика и текстуры',
+              subtitle: 'Локализация интерфейса и графических файлов',
+              // Locked (dimmed + gold "Недоступно" badge) until the user
               // has active Telegram-channel premium access.
               trailing: controller.isPremium
                   ? _buildArtVersionBadge(controller)
@@ -949,7 +949,7 @@ class _MainScreenState extends State<MainScreen> {
                         builder: (ctx) => AlertDialog(
                           backgroundColor: Theme.of(context).cardColor,
                           title: Text(
-                            'РЈРґР°Р»РёС‚СЊ/РІРѕСЃСЃС‚Р°РЅРѕРІРёС‚СЊ',
+                            'Удалить/восстановить',
                             style: TextStyle(
                               color: Theme.of(context)
                                   .textTheme
@@ -961,7 +961,7 @@ class _MainScreenState extends State<MainScreen> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Text(
-                                'Р’С‹Р±РµСЂРёС‚Рµ, С‡С‚Рѕ РІС‹ С…РѕС‚РёС‚Рµ СѓРґР°Р»РёС‚СЊ РёР· СѓСЃС‚Р°РЅРѕРІРєРё:',
+                                'Выберите, что вы хотите удалить из установки:',
                                 style: TextStyle(
                                   color: Theme.of(context)
                                       .textTheme
@@ -972,13 +972,13 @@ class _MainScreenState extends State<MainScreen> {
                               const SizedBox(height: 12),
                               ElevatedButton(
                                 onPressed: () => Navigator.of(ctx).pop('text'),
-                                child: const Text('РЈРґР°Р»РёС‚СЊ СЂСѓСЃРёС„РёРєР°С‚РѕСЂ С‚РµРєСЃС‚Р°'),
+                                child: const Text('Удалить русификатор текста'),
                               ),
                               const SizedBox(height: 8),
                               ElevatedButton(
                                 onPressed: () => Navigator.of(ctx).pop('art'),
                                 child: const Text(
-                                  'РЈРґР°Р»РёС‚СЊ СЂСѓСЃРёС„РёРєР°С‚РѕСЂ С‚РµРєСЃС‚СѓСЂ',
+                                  'Удалить русификатор текстур',
                                 ),
                               ),
                               const SizedBox(height: 8),
@@ -988,7 +988,7 @@ class _MainScreenState extends State<MainScreen> {
                                 ),
                                 onPressed: () => Navigator.of(ctx).pop('all'),
                                 child: const Text(
-                                  'РЈРґР°Р»РёС‚СЊ РІСЃС‘',
+                                  'Удалить всё',
                                   style: TextStyle(color: Colors.white),
                                 ),
                               ),
@@ -997,7 +997,7 @@ class _MainScreenState extends State<MainScreen> {
                           actions: [
                             TextButton(
                               onPressed: () => Navigator.of(ctx).pop(null),
-                              child: const Text('РћС‚РјРµРЅР°'),
+                              child: const Text('Отмена'),
                             ),
                           ],
                         ),
@@ -1012,7 +1012,7 @@ class _MainScreenState extends State<MainScreen> {
                         builder: (c2) => AlertDialog(
                           backgroundColor: Theme.of(context).cardColor,
                           title: Text(
-                            'РџРѕРґС‚РІРµСЂРґРёС‚Рµ РґРµР№СЃС‚РІРёРµ',
+                            'Подтвердите действие',
                             style: TextStyle(
                               color: Theme.of(context)
                                   .textTheme
@@ -1021,11 +1021,11 @@ class _MainScreenState extends State<MainScreen> {
                             ),
                           ),
                           content: Text(
-                            'Р’С‹ СѓРІРµСЂРµРЅС‹, С‡С‚Рѕ С…РѕС‚РёС‚Рµ РІС‹РїРѕР»РЅРёС‚СЊ РґРµР№СЃС‚РІРёРµ: ${choice == 'all'
-                                ? 'РЈРґР°Р»РёС‚СЊ РІСЃС‘'
+                            'Вы уверены, что хотите выполнить действие: ${choice == 'all'
+                                ? 'Удалить всё'
                                 : choice == 'art'
-                                ? 'РЈРґР°Р»РёС‚СЊ С‚РµРєСЃС‚СѓСЂС‹'
-                                : 'РЈРґР°Р»РёС‚СЊ С‚РµРєСЃС‚'}?',
+                                ? 'Удалить текстуры'
+                                : 'Удалить текст'}?',
                             style: TextStyle(
                               color: Theme.of(context)
                                   .textTheme
@@ -1036,11 +1036,11 @@ class _MainScreenState extends State<MainScreen> {
                           actions: [
                             TextButton(
                               onPressed: () => Navigator.of(c2).pop(false),
-                              child: const Text('РћС‚РјРµРЅР°'),
+                              child: const Text('Отмена'),
                             ),
                             ElevatedButton(
                               onPressed: () => Navigator.of(c2).pop(true),
-                              child: const Text('Р’С‹РїРѕР»РЅРёС‚СЊ'),
+                              child: const Text('Выполнить'),
                             ),
                           ],
                         ),
@@ -1055,19 +1055,19 @@ class _MainScreenState extends State<MainScreen> {
                         messenger.showSnackBar(
                           const SnackBar(
                             content: Text(
-                              'РћРїРµСЂР°С†РёСЏ СѓРґР°Р»РµРЅРёСЏ/РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёСЏ Р·Р°РІРµСЂС€РµРЅР°',
+                              'Операция удаления/восстановления завершена',
                             ),
                           ),
                         );
                       } catch (e) {
                         if (!mounted || messenger == null) return;
                         messenger.showSnackBar(
-                          SnackBar(content: Text('РћС€РёР±РєР°: ${e.toString()}')),
+                          SnackBar(content: Text('Ошибка: ${e.toString()}')),
                         );
                       }
                     },
                     child: Text(
-                      'РЈРґР°Р»РёС‚СЊ',
+                      'Удалить',
                       style: TextStyle(
                         color: Theme.of(context).textTheme.bodySmall?.color,
                       ),
@@ -1088,7 +1088,7 @@ class _MainScreenState extends State<MainScreen> {
                         ? null
                         : () => _showInstallChoiceDialog(controller),
                     child: Text(
-                      controller.hasUpdate ? 'РћР±РЅРѕРІРёС‚СЊ' : 'РЈСЃС‚Р°РЅРѕРІРёС‚СЊ',
+                      controller.hasUpdate ? 'Обновить' : 'Установить',
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         color: Colors.white,
@@ -1168,7 +1168,7 @@ class _MainScreenState extends State<MainScreen> {
                         ),
                         SizedBox(height: 2),
                         Text(
-                          'РџРѕР»РЅР°СЏ СЂСѓСЃРёС„РёРєР°С†РёСЏ (С‚РµРєСЃС‚, РёРЅС‚РµСЂС„РµР№СЃ Рё РіСЂР°С„РёРєР°)',
+                          'Полная русификация (текст, интерфейс и графика)',
                           style: TextStyle(color: Colors.white70, fontSize: 13),
                         ),
                       ],
@@ -1200,7 +1200,7 @@ class _MainScreenState extends State<MainScreen> {
                               ),
                               SizedBox(width: 6),
                               Text(
-                                'Р”РѕСЃС‚СѓРїРЅРѕ РѕР±РЅРѕРІР»РµРЅРёРµ',
+                                'Доступно обновление',
                                 style: TextStyle(
                                   color: Color(0xFFFFA726),
                                   fontWeight: FontWeight.w700,
@@ -1368,7 +1368,7 @@ class _MainScreenState extends State<MainScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'РРЅС„РѕСЂРјР°С†РёСЏ РѕР± РѕР±РЅРѕРІР»РµРЅРёРё',
+            'Информация об обновлении',
             style: TextStyle(
               fontWeight: FontWeight.w600,
               fontSize: 12,
@@ -1381,7 +1381,7 @@ class _MainScreenState extends State<MainScreen> {
             child: SingleChildScrollView(
               child: Text(
                 controller.changelog.isEmpty
-                    ? 'РЎРїРёСЃРѕРє РёР·РјРµРЅРµРЅРёР№ РїРѕРєР° РЅРµРґРѕСЃС‚СѓРїРµРЅ.'
+                    ? 'Список изменений пока недоступен.'
                     : controller.changelog,
                 style: TextStyle(
                   color: Theme.of(context).textTheme.bodySmall?.color,
@@ -1402,11 +1402,11 @@ class _MainScreenState extends State<MainScreen> {
     final IconData icon;
     if (notInstalled) {
       color = Colors.grey.shade500;
-      label = 'РќРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅРѕ';
+      label = 'Не установлено';
       icon = Icons.remove_circle_outline_rounded;
     } else if (controller.hasUpdate) {
       color = const Color(0xFFD97706);
-      label = 'РћР±РЅРѕРІР»РµРЅРёРµ ${controller.remoteVersion}';
+      label = 'Обновление ${controller.remoteVersion}';
       icon = Icons.upgrade_rounded;
     } else {
       color = const Color(0xFF2E7D32);
@@ -1445,11 +1445,11 @@ class _MainScreenState extends State<MainScreen> {
     final IconData icon;
     if (notInstalled) {
       color = Colors.grey.shade500;
-      label = 'РќРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅРѕ';
+      label = 'Не установлено';
       icon = Icons.remove_circle_outline_rounded;
     } else if (controller.hasArtUpdate) {
       color = const Color(0xFFD97706);
-      label = 'РћР±РЅРѕРІР»РµРЅРёРµ ${controller.remoteArtVersion}';
+      label = 'Обновление ${controller.remoteArtVersion}';
       icon = Icons.upgrade_rounded;
     } else {
       color = const Color(0xFF2E7D32);
@@ -1483,7 +1483,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   /// Gold "locked" badge shown instead of [_buildArtVersionBadge] on the
-  /// "Р“СЂР°С„РёРєР° Рё С‚РµРєСЃС‚СѓСЂС‹" card when the user doesn't have active premium
+  /// "Графика и текстуры" card when the user doesn't have active premium
   /// (Telegram channel) access. Gold was chosen (rather than plain grey) so
   /// it reads as "premium/PRO feature" instead of a generic disabled state.
   Widget _buildPremiumLockBadge() {
@@ -1501,7 +1501,7 @@ class _MainScreenState extends State<MainScreen> {
           Icon(Icons.lock_rounded, color: color, size: 14),
           SizedBox(width: 6),
           Text(
-            'РќРµРґРѕСЃС‚СѓРїРЅРѕ',
+            'Недоступно',
             style: TextStyle(
               color: color,
               fontWeight: FontWeight.w700,
@@ -1513,7 +1513,7 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  /// Shown when a locked "Р“СЂР°С„РёРєР° Рё С‚РµРєСЃС‚СѓСЂС‹" card is tapped: explains that
+  /// Shown when a locked "Графика и текстуры" card is tapped: explains that
   /// texture packs require Telegram channel membership and offers a way to
   /// join the channel or retry the login (e.g. after the JWT expired).
   Future<void> _showPremiumLockDialog(LauncherController controller) async {
@@ -1526,17 +1526,17 @@ class _MainScreenState extends State<MainScreen> {
           children: [
             Icon(Icons.lock_rounded, color: Color(0xFFC9A227)),
             SizedBox(width: 8),
-            Text('Р”РѕСЃС‚СѓРї РѕРіСЂР°РЅРёС‡РµРЅ'),
+            Text('Доступ ограничен'),
           ],
         ),
         content: const Text(
-          'Р“СЂР°С„РёС‡РµСЃРєР°СЏ Р»РѕРєР°Р»РёР·Р°С†РёСЏ РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ СѓС‡Р°СЃС‚РЅРёРєР°Рј РЅР°С€РµРіРѕ РїСЂРёРІР°С‚РЅРѕРіРѕ РїСЂРµРјРёСѓРј-РєР°РЅР°Р»Р°. '
-          'РџСЂРёСЃРѕРµРґРёРЅРёС‚РµСЃСЊ Рє РєР°РЅР°Р»Сѓ, Р° Р·Р°С‚РµРј РїРѕРІС‚РѕСЂРЅРѕ РІРѕР№РґРёС‚Рµ С‡РµСЂРµР· Telegram, С‡С‚РѕР±С‹ СЂР°Р·Р±Р»РѕРєРёСЂРѕРІР°С‚СЊ СѓСЃС‚Р°РЅРѕРІРєСѓ С‚РµРєСЃС‚СѓСЂ.',
+          'Графическая локализация доступна только участникам нашего приватного премиум-канала. '
+          'Присоединитесь к каналу, а затем повторно войдите через Telegram, чтобы разблокировать установку текстур.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('РћС‚РјРµРЅР°'),
+            child: const Text('Отмена'),
           ),
           OutlinedButton.icon(
             onPressed: () async {
@@ -1547,13 +1547,13 @@ class _MainScreenState extends State<MainScreen> {
               if (!opened && mounted && messenger != null) {
                 messenger.showSnackBar(
                   const SnackBar(
-                    content: Text('РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РєСЂС‹С‚СЊ СЃСЃС‹Р»РєСѓ: $premiumChannelUrl'),
+                    content: Text('Не удалось открыть ссылку: $premiumChannelUrl'),
                   ),
                 );
               }
             },
             icon: const Icon(Icons.diamond_rounded, size: 16),
-            label: const Text('РџСЂРёСЃРѕРµРґРёРЅРёС‚СЊСЃСЏ Рє РїСЂРµРјРёСѓРј-РєР°РЅР°Р»Сѓ'),
+            label: const Text('Присоединиться к премиум-каналу'),
           ),
           ElevatedButton.icon(
             onPressed: () async {
@@ -1561,7 +1561,7 @@ class _MainScreenState extends State<MainScreen> {
               await _retryTelegramLogin(controller);
             },
             icon: const Icon(Icons.refresh_rounded, size: 16),
-            label: const Text('РџСЂРѕРІРµСЂРёС‚СЊ РґРѕСЃС‚СѓРї РїРѕРІС‚РѕСЂРЅРѕ'),
+            label: const Text('Проверить доступ повторно'),
           ),
         ],
       ),
@@ -1587,8 +1587,8 @@ class _MainScreenState extends State<MainScreen> {
           SnackBar(
             content: Text(
               controller.isPremium
-                  ? 'Р’С…РѕРґ РІС‹РїРѕР»РЅРµРЅ. РўРµРєСЃС‚СѓСЂС‹ СЂР°Р·Р±Р»РѕРєРёСЂРѕРІР°РЅС‹.'
-                  : 'Р’С…РѕРґ РІС‹РїРѕР»РЅРµРЅ. РўРµРєСЃС‚РѕРІР°СЏ Р»РѕРєР°Р»РёР·Р°С†РёСЏ РґРѕСЃС‚СѓРїРЅР°.',
+                  ? 'Вход выполнен. Текстуры разблокированы.'
+                  : 'Вход выполнен. Текстовая локализация доступна.',
             ),
           ),
         );
@@ -1598,7 +1598,7 @@ class _MainScreenState extends State<MainScreen> {
       messenger.showSnackBar(SnackBar(content: Text(e.message)));
     } catch (e) {
       if (!mounted || messenger == null) return;
-      messenger.showSnackBar(SnackBar(content: Text('РћС€РёР±РєР° РІС…РѕРґР°: $e')));
+      messenger.showSnackBar(SnackBar(content: Text('Ошибка входа: $e')));
     }
   }
 
@@ -1612,8 +1612,8 @@ class _MainScreenState extends State<MainScreen> {
   }) {
     final content = Opacity(
       // Dimming (opacity 0.55) is the visual cue for a component the user
-      // can't access yet вЂ” currently used for the locked "Р“СЂР°С„РёРєР° Рё
-      // С‚РµРєСЃС‚СѓСЂС‹" card when the user has no active premium (Telegram) access.
+      // can't access yet — currently used for the locked "Графика и
+      // текстуры" card when the user has no active premium (Telegram) access.
       opacity: dimmed ? 0.55 : 1.0,
       child: Container(
         padding: const EdgeInsets.all(16),

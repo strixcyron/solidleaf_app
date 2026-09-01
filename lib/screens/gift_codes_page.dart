@@ -1,5 +1,6 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
 class GiftCodesPage extends StatefulWidget {
   const GiftCodesPage({super.key});
 
@@ -9,38 +10,38 @@ class GiftCodesPage extends StatefulWidget {
 
 class _GiftCodesPageState extends State<GiftCodesPage> {
   static const List<_GiftCodeEntry> _giftCodes = [
-    _GiftCodeEntry(code: '5YRBRF9', status: 'РђРєС‚РёРІРµРЅ', permanent: true),
-    _GiftCodeEntry(code: '1999GIFT', status: 'РђРєС‚РёРІРµРЅ', permanent: true),
-    _GiftCodeEntry(code: 'GachaGaming1999', status: 'РђРєС‚РёРІРµРЅ', permanent: true),
+    _GiftCodeEntry(code: '5YRBRF9', status: 'Активен', permanent: true),
+    _GiftCodeEntry(code: '1999GIFT', status: 'Активен', permanent: true),
+    _GiftCodeEntry(code: 'GachaGaming1999', status: 'Активен', permanent: true),
     _GiftCodeEntry(
       code: 'MainStoryChapt12',
-      status: 'Р—Р°РєРѕРЅС‡РµРЅ',
+      status: 'Закончен',
       permanent: false,
     ),
-    _GiftCodeEntry(code: 'KnightsDuty', status: 'Р—Р°РєРѕРЅС‡РµРЅ', permanent: false),
-    _GiftCodeEntry(code: 'RestlessSouls', status: 'Р—Р°РєРѕРЅС‡РµРЅ', permanent: false),
+    _GiftCodeEntry(code: 'KnightsDuty', status: 'Закончен', permanent: false),
+    _GiftCodeEntry(code: 'RestlessSouls', status: 'Закончен', permanent: false),
     _GiftCodeEntry(
       code: 'Halfannivlive0404',
-      status: 'Р—Р°РєРѕРЅС‡РµРЅ',
+      status: 'Закончен',
       permanent: false,
     ),
-    _GiftCodeEntry(code: 'PastShadows', status: 'Р—Р°РєРѕРЅС‡РµРЅ', permanent: false),
-    _GiftCodeEntry(code: 'DeadSilence', status: 'Р—Р°РєРѕРЅС‡РµРЅ', permanent: false),
+    _GiftCodeEntry(code: 'PastShadows', status: 'Закончен', permanent: false),
+    _GiftCodeEntry(code: 'DeadSilence', status: 'Закончен', permanent: false),
     _GiftCodeEntry(
       code: 'PaperHeronLiveHost0404',
-      status: 'Р—Р°РєРѕРЅС‡РµРЅ',
+      status: 'Закончен',
       permanent: false,
     ),
-    _GiftCodeEntry(code: 'UndyingLight', status: 'Р—Р°РєРѕРЅС‡РµРЅ', permanent: false),
-    _GiftCodeEntry(code: 'LastDefence', status: 'Р—Р°РєРѕРЅС‡РµРЅ', permanent: false),
-    _GiftCodeEntry(code: 'NoMercy', status: 'Р—Р°РєРѕРЅС‡РµРЅ', permanent: false),
+    _GiftCodeEntry(code: 'UndyingLight', status: 'Закончен', permanent: false),
+    _GiftCodeEntry(code: 'LastDefence', status: 'Закончен', permanent: false),
+    _GiftCodeEntry(code: 'NoMercy', status: 'Закончен', permanent: false),
   ];
 
   Future<void> _copyCode(String code) async {
     await Clipboard.setData(ClipboardData(text: code));
     if (!mounted) return;
     ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text('РљРѕРґ СЃРєРѕРїРёСЂРѕРІР°РЅ: $code')));
+        .showSnackBar(SnackBar(content: Text('Код скопирован: $code')));
   }
 
   @override
@@ -51,7 +52,7 @@ class _GiftCodesPageState extends State<GiftCodesPage> {
         backgroundColor: Theme.of(context).cardColor,
         foregroundColor: Theme.of(context).textTheme.bodyMedium?.color,
         elevation: 0,
-        title: const Text('РџРѕРґР°СЂРѕС‡РЅС‹Рµ РєРѕРґС‹'),
+        title: const Text('Подарочные коды'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
           onPressed: () => Navigator.of(context).pop(),
@@ -65,7 +66,7 @@ class _GiftCodesPageState extends State<GiftCodesPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'РџРѕРґР°СЂРѕС‡РЅС‹Рµ РєРѕРґС‹',
+                  'Подарочные коды',
                   style: TextStyle(
                     fontSize: 26,
                     fontWeight: FontWeight.bold,
@@ -74,7 +75,7 @@ class _GiftCodesPageState extends State<GiftCodesPage> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'РљРѕРїРёСЂСѓР№С‚Рµ РєРѕРґС‹ Рё РІСЃС‚Р°РІР»СЏР№С‚Рµ РёС… РІ РёРіСЂСѓ. РџРµСЂРёРѕРґРёС‡РµСЃРєРё РїСЂРѕРІРµСЂСЏР№С‚Рµ РѕР±РЅРѕРІР»РµРЅРёСЏ.',
+                  'Копируйте коды и вставляйте их в игру. Периодически проверяйте обновления.',
                   style: TextStyle(
                     color: Theme.of(context).textTheme.bodySmall?.color,
                     height: 1.5,
@@ -148,7 +149,7 @@ class _GiftCodesPageState extends State<GiftCodesPage> {
                                   const SizedBox(width: 8),
                                   if (entry.permanent)
                                     Text(
-                                      'Р‘РµР· СЃСЂРѕРєР° РіРѕРґРЅРѕСЃС‚Рё',
+                                      'Без срока годности',
                                       style: TextStyle(
                                         color: Theme.of(context)
                                             .textTheme
@@ -165,7 +166,7 @@ class _GiftCodesPageState extends State<GiftCodesPage> {
                         const SizedBox(width: 12),
                         IconButton(
                           onPressed: () => _copyCode(entry.code),
-                          tooltip: 'РљРѕРїРёСЂРѕРІР°С‚СЊ РєРѕРґ',
+                          tooltip: 'Копировать код',
                           style: IconButton.styleFrom(
                             backgroundColor: accent.withValues(alpha: 0.12),
                             shape: RoundedRectangleBorder(
