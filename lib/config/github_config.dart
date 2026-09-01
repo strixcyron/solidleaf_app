@@ -205,12 +205,11 @@ class GitHubConfig {
     }
   }
 
-  /// Human-readable setup hint for the current platform.
+  /// Подсказка при отсутствии токена (в основном для Windows-сборок).
   static String get setupHint {
     if (Platform.isAndroid || Platform.isIOS) {
-      return 'Создайте dart_defines.local.json (см. dart_defines.local.json.example) '
-          'и запускайте через конфигурацию «local secrets» в VS Code / Cursor, '
-          'либо: flutter run --dart-define-from-file=dart_defines.local.json';
+      return 'На Android/iOS премиум-релизы идут через auth-backend по JWT после '
+          'входа в Telegram. GITHUB_TOKEN в APK не требуется.';
     }
     return 'Создайте secrets/github_token.txt в корне проекта '
         'или dart_defines.local.json (см. dart_defines.local.json.example), '

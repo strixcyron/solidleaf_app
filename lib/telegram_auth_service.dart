@@ -259,15 +259,52 @@ class TelegramAuthService {
     await _secureStorage.delete(key: _accessLevelKey);
   }
 
-  /// Downloads the protected texture archive using the stored JWT as a
-  /// Bearer token. Saves the response bytes to a temporary file and returns
-  /// it.
-  /// - On 401 (missing/invalid/expired token) the local session is cleared
-  ///   entirely (the user must log in again).
-  /// - On 403 (valid token, but "basic" tier — not a premium/channel member)
-  ///   the session is left intact; only a clear explanatory error is thrown,
-  ///   since the user is still validly logged in for text localization.
-  Future<File> downloadPremiumTextures({
+  /// Метаданные последнего релиза с auth-backend (JWT определяет free/premium).
+  Future<Map<String, dynamic>> fetchLatestRelease() async {
+    final token = await getStoredToken();
+    if (token == null || token.isEmpty) {
+      throw TelegramAuthException(
+        'Вы не авторизованы. Войдите через Telegram.',
+      );
+    }
+
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        '${TelegramAuthConfig.baseUrl}/api/release/latest',
+        options: Options(
+          headers: {'Authorization': 'Bearer $token'},
+          receiveTimeout: const Duration(seconds: 30),
+        ),
+      );
+      final data = response.data;
+      if (data == null) {
+        throw TelegramAuthException('Пустой ответ сервера при проверке релиза.');
+      }
+      return Map<String, dynamic>.from(data);
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) {
+        await logout();
+        throw TelegramAuthException(
+          'Сессия истекла. Пожалуйста, войдите снова через Telegram.',
+        );
+      }
+      final detail = _extractBackendError(e);
+      if (e.response?.statusCode == 502) {
+        throw TelegramAuthException(
+          detail ??
+              'Auth-backend не смог получить релиз с GitHub. '
+              'Проверьте GITHUB_TOKEN и GITHUB_*_REPO на сервере.',
+        );
+      }
+      throw TelegramAuthException(
+        detail ?? 'Не удалось получить релиз: ${e.message ?? e.toString()}',
+      );
+    }
+  }
+
+  /// Скачивает премиум-архив через auth-backend (`art` или `full`).
+  Future<File> downloadPremiumAsset({
+    required String assetKind,
     ProgressCallback? onProgress,
   }) async {
     final token = await getStoredToken();
@@ -277,15 +314,13 @@ class TelegramAuthService {
       );
     }
 
-    // The backend proxies this straight from a private GitHub repo release
-    // (see /api/download/premium), picking the asset that matches this
-    // platform's naming convention (e.g. "*_pc_art.zip" / "*_android_art.zip").
     final platform = Platform.isAndroid ? 'android' : 'pc';
+    final kind = assetKind.toLowerCase();
 
     try {
       final response = await _dio.get<List<int>>(
         '${TelegramAuthConfig.baseUrl}/api/download/premium',
-        queryParameters: {'platform': platform},
+        queryParameters: {'platform': platform, 'asset_kind': kind},
         onReceiveProgress: onProgress,
         options: Options(
           headers: {'Authorization': 'Bearer $token'},
@@ -297,39 +332,69 @@ class TelegramAuthService {
       final bytes = response.data;
       if (bytes == null) {
         throw TelegramAuthException(
-          'Пустой ответ сервера при скачивании текстур.',
+          'Пустой ответ сервера при скачивании ($kind).',
         );
       }
 
       final tempDir = await getTemporaryDirectory();
       final filePath =
-          '${tempDir.path}/premium_textures_${DateTime.now().millisecondsSinceEpoch}.zip';
+          '${tempDir.path}/premium_${kind}_${DateTime.now().millisecondsSinceEpoch}.zip';
       final file = File(filePath);
       await file.writeAsBytes(bytes, flush: true);
       return file;
     } on DioException catch (e) {
       if (e.response?.statusCode == 401) {
-        // Token expired/invalid on the server side — clear it locally so the
-        // UI can prompt the user to log in again.
         await logout();
         throw TelegramAuthException(
           'Сессия истекла. Пожалуйста, войдите снова через Telegram.',
         );
       }
       if (e.response?.statusCode == 403) {
-        // Token is still valid but this account is "basic" tier — keep the
-        // session, just surface the backend's explanation to the user.
-        final detail = e.response?.data is Map
-            ? (e.response!.data as Map)['detail']?.toString()
-            : null;
         throw TelegramAuthException(
-          detail ?? 'Текстуры доступны только премиум-подписчикам.',
+          _extractBackendError(e) ?? 'Доступно только премиум-подписчикам.',
+        );
+      }
+      if (e.response?.statusCode == 502) {
+        throw TelegramAuthException(
+          _extractBackendError(e) ??
+              'Auth-backend не смог скачать архив с GitHub. '
+              'Проверьте настройки сервера.',
         );
       }
       throw TelegramAuthException(
-        'Не удалось скачать текстуры: ${e.message ?? e.toString()}',
+        _extractBackendError(e) ??
+            'Не удалось скачать архив: ${e.message ?? e.toString()}',
       );
     }
+  }
+
+  /// Текст ошибки из JSON-ответа FastAPI (`error` / `detail`).
+  String? _extractBackendError(DioException e) {
+    final data = e.response?.data;
+    if (data is Map) {
+      final error = data['error'] ?? data['detail'];
+      if (error != null) {
+        return error.toString();
+      }
+    }
+    if (data is String && data.isNotEmpty) {
+      return data;
+    }
+    return null;
+  }
+
+  /// Downloads the protected texture archive using the stored JWT as a
+  /// Bearer token. Saves the response bytes to a temporary file and returns
+  /// it.
+  /// - On 401 (missing/invalid/expired token) the local session is cleared
+  ///   entirely (the user must log in again).
+  /// - On 403 (valid token, but "basic" tier — not a premium/channel member)
+  ///   the session is left intact; only a clear explanatory error is thrown,
+  ///   since the user is still validly logged in for text localization.
+  Future<File> downloadPremiumTextures({
+    ProgressCallback? onProgress,
+  }) async {
+    return downloadPremiumAsset(assetKind: 'art', onProgress: onProgress);
   }
 
   /// Releases resources. Call this from a widget's `dispose()` if you hold a

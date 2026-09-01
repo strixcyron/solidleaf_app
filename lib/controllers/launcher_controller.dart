@@ -97,6 +97,11 @@ class LauncherController extends ChangeNotifier {
     _cachedReleaseIsPremium = null;
   }
 
+  /// Премиум без встроенного GITHUB_TOKEN — через auth-backend и JWT
+  /// (Android/iOS и сборки без dart-define).
+  bool get _usesAuthBackendForPremium =>
+      isPremium && !GitHubConfig.hasPremiumToken;
+
   String get _activeReleaseApiUrl =>
       isPremium ? githubPremiumLatestReleaseUrl : githubFreeLatestReleaseUrl;
 
@@ -186,8 +191,12 @@ class LauncherController extends ChangeNotifier {
     }
     await GitHubConfig.warmUp();
     debugPrint('[GitHubConfig] ${GitHubConfig.debugState}');
-    addLog('GitHub token — ${GitHubConfig.debugState}');
     await refreshPremiumStatus();
+    if (_usesAuthBackendForPremium) {
+      addLog('Премиум-релизы: auth-backend (JWT), без GITHUB_TOKEN в приложении');
+    } else {
+      addLog('GitHub token — ${GitHubConfig.debugState}');
+    }
     if (Platform.isAndroid) {
       await checkShizukuStatus();
     }
@@ -783,6 +792,10 @@ class LauncherController extends ChangeNotifier {
   }
 
   Future<Map<String, dynamic>> _fetchLatestRelease({bool force = false}) async {
+    if (_usesAuthBackendForPremium) {
+      return _fetchLatestReleaseViaBackend(force: force);
+    }
+
     await GitHubConfig.warmUp(force: !GitHubConfig.hasPremiumToken);
 
     if (!force &&
@@ -866,6 +879,30 @@ class LauncherController extends ChangeNotifier {
     throw Exception(
       'Релиз не найден в репозитории $_activeReleaseRepoLabel (HTTP $lastStatus).',
     );
+  }
+
+  /// Метаданные релиза через FastAPI (токен GitHub остаётся на сервере).
+  Future<Map<String, dynamic>> _fetchLatestReleaseViaBackend({
+    bool force = false,
+  }) async {
+    if (!force &&
+        _cachedRelease != null &&
+        _cachedReleaseAt != null &&
+        _cachedReleaseIsPremium == isPremium &&
+        DateTime.now().difference(_cachedReleaseAt!) < _releaseCacheTtl) {
+      return _cachedRelease!;
+    }
+
+    addLog('Auth-backend → /api/release/latest');
+    try {
+      final data = await telegramAuth.fetchLatestRelease();
+      _cachedRelease = data;
+      _cachedReleaseAt = DateTime.now();
+      _cachedReleaseIsPremium = isPremium;
+      return data;
+    } on TelegramAuthException catch (e) {
+      throw Exception(e.message);
+    }
   }
 
   List<Map<String, dynamic>> _releaseAssets(Map<String, dynamic> release) {
@@ -1129,10 +1166,89 @@ class LauncherController extends ChangeNotifier {
   }
 
 
+  /// Скачивание премиум-архива через auth-backend (Android без GITHUB_TOKEN).
+  Future<void> _downloadAndInstallViaBackend({required String kind}) async {
+    final assetKind = kind == 'art' ? 'art' : 'full';
+
+    try {
+      isDownloading = true;
+      downloadingKind = kind;
+      downloadProgress = 0;
+      notifyListeners();
+
+      addLog('Загрузка через auth-backend ($assetKind)...');
+      final zipFile = await telegramAuth.downloadPremiumAsset(
+        assetKind: assetKind,
+        onProgress: (received, total) {
+          if (total <= 0) {
+            return;
+          }
+          final progress = received / total;
+          downloadProgress = progress;
+          statusText = kind == 'art'
+              ? 'Загрузка текстур: ${(progress * 100).toStringAsFixed(0)}%'
+              : 'Загрузка: ${(progress * 100).toStringAsFixed(0)}%';
+          notifyListeners();
+        },
+      );
+
+      addLog('Архив загружен: ${zipFile.path}');
+      await _extractArchive(zipFile.path, installPath, archiveKind: kind);
+
+      final installedVersion = kind == 'art' ? remoteArtVersion : remoteVersion;
+      final prefs = await SharedPreferences.getInstance();
+      if (kind == 'art') {
+        await prefs.setString('installed_art_version', installedVersion);
+        currentArtVersion = installedVersion;
+        remoteArtVersion = installedVersion;
+        hasArtUpdate = false;
+      } else {
+        await prefs.setString('installed_version', installedVersion);
+        currentVersion = installedVersion;
+        remoteVersion = installedVersion;
+        hasUpdate = false;
+      }
+
+      downloadProgress = 1;
+      statusText = kind == 'art'
+          ? 'Установка текстур завершена'
+          : 'Установка завершена';
+      notifyListeners();
+      await Future<void>.delayed(const Duration(milliseconds: 280));
+      isDownloading = false;
+      downloadingKind = null;
+      downloadProgress = 0;
+      addLog(
+        kind == 'art'
+            ? 'Установка графики и текстур завершена.'
+            : 'Развёртывание файлов закончено.',
+      );
+      notifyListeners();
+    } on TelegramAuthException catch (e) {
+      isDownloading = false;
+      downloadingKind = null;
+      statusText = e.message;
+      addLog(statusText);
+      notifyListeners();
+    } catch (error) {
+      isDownloading = false;
+      downloadingKind = null;
+      final message = 'Ошибка установки: ${error.toString()}';
+      statusText = message;
+      addLog(message);
+      notifyListeners();
+    }
+  }
+
   Future<void> _downloadAndInstallReleaseAsset(
     Map<String, dynamic> asset, {
     required String kind,
   }) async {
+    if (_usesAuthBackendForPremium) {
+      await _downloadAndInstallViaBackend(kind: kind);
+      return;
+    }
+
     final zipUrl = _resolveAssetDownloadUrl(asset);
     if (zipUrl == null || zipUrl.isEmpty) {
       throw DioException(
