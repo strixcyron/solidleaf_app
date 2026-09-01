@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:text_scroll/text_scroll.dart';
 
 import '../models/audio_track.dart';
+import 'effects/audio_visualizer.dart';
+import 'effects/magnetic_hover.dart';
+import 'effects/parallax_cover.dart';
 import 'wave_slider_track_shape.dart';
 
 class MiniPlayer extends StatefulWidget {
@@ -283,19 +286,19 @@ class _MiniPlayerState extends State<MiniPlayer>
                         children: [
                           // Шапка альбома (Квадратная обложка с градиентом)
                           Center(
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(12),
-                              child: SizedBox(
-                                width: 355, // Задаем квадратные пропорции
-                                height: 300, 
-                                child: Stack(
-                                  fit: StackFit.expand,
-                                  children: [
-                                    // Сама обложка
-                                    Image.asset(
-                                      selectedAlbum!.coverAsset,
-                                      fit: BoxFit.cover,
-                                    ),
+                            child: ParallaxCover(
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: SizedBox(
+                                  width: 355,
+                                  height: 300,
+                                  child: Stack(
+                                    fit: StackFit.expand,
+                                    children: [
+                                      Image.asset(
+                                        selectedAlbum!.coverAsset,
+                                        fit: BoxFit.cover,
+                                      ),
                                     // Градиентное затемнение (плавно от центра к низу)
                                     DecoratedBox(
                                       decoration: BoxDecoration(
@@ -345,6 +348,7 @@ class _MiniPlayerState extends State<MiniPlayer>
                                 ),
                               ),
                             ),
+                          ),
                           ),
                           const Divider(height: 20),
                           // Список треков альбома
@@ -466,29 +470,30 @@ class _MiniPlayerState extends State<MiniPlayer>
         children: [
           Row(
             children: [
- // Виниловая пластинка
-              RotationTransition(
-                turns: _vinylController,
-                child: Container(
-                  width: 56, // Увеличил общую ширину пластинки (было 50)
-                  height: 56, // Увеличил общую высоту (было 50)
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: const Color(0xFF111111),
-                    border: Border.all(color: Colors.black45, width: 2),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.3),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
+              ParallaxCover(
+                maxOffset: 2.5,
+                child: RotationTransition(
+                  turns: _vinylController,
+                  child: Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: const Color(0xFF111111),
+                      border: Border.all(color: Colors.black45, width: 2),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.3),
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(3.0),
+                      child: ClipOval(
+                        child: Image.asset(track.coverAsset, fit: BoxFit.cover),
                       ),
-                    ],
-                  ),
-                  child: Padding(
-                    // Уменьшил отступ, чтобы картинка заняла больше места (было 8.0)
-                    padding: const EdgeInsets.all(3.0),
-                    child: ClipOval(
-                      child: Image.asset(track.coverAsset, fit: BoxFit.cover),
                     ),
                   ),
                 ),
@@ -541,6 +546,11 @@ class _MiniPlayerState extends State<MiniPlayer>
                 onPressed: _showPlaylist,
               ),
             ],
+          ),
+
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: AudioVisualizer(isPlaying: isPlaying),
           ),
 
 // Прогресс-бар длительности
@@ -618,23 +628,25 @@ class _MiniPlayerState extends State<MiniPlayer>
                 color: Theme.of(context).textTheme.bodyMedium?.color,
                 onPressed: prevTrack,
               ),
-              Container(
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Theme.of(context)
-                      .colorScheme
-                      .primary
-                      .withValues(alpha: 0.2),
-                ),
-                child: IconButton(
-                  icon: Icon(
-                    isPlaying
-                        ? Icons.pause_rounded
-                        : Icons.play_arrow_rounded,
+              MagneticHover(
+                child: Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Theme.of(context)
+                        .colorScheme
+                        .primary
+                        .withValues(alpha: 0.2),
                   ),
-                  color: Theme.of(context).colorScheme.primary,
-                  iconSize: 28,
-                  onPressed: togglePlay,
+                  child: IconButton(
+                    icon: Icon(
+                      isPlaying
+                          ? Icons.pause_rounded
+                          : Icons.play_arrow_rounded,
+                    ),
+                    color: Theme.of(context).colorScheme.primary,
+                    iconSize: 28,
+                    onPressed: togglePlay,
+                  ),
                 ),
               ),
               IconButton(

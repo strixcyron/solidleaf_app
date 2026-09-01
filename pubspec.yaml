@@ -20,6 +20,7 @@ dependencies:
   audioplayers: ^6.0.0 # Актуальная версия пакета
   text_scroll: ^0.2.0
   squiggly_slider: ^1.0.5
+  palette_generator: ^0.3.3+7
 
 dev_dependencies:
   flutter_test:

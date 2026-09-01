@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_constants.dart';
 import '../config/github_config.dart';
+import '../services/cover_accent_loader.dart';
 import '../telegram_auth_service.dart';
 
 class LauncherController extends ChangeNotifier {
@@ -40,6 +41,7 @@ class LauncherController extends ChangeNotifier {
   String changelog = 'Проверка обновлений не запускалась';
   String statusText = 'Готово';
   List<String> logs = [];
+  Color? coverAccent;
 
   Map<String, dynamic>? _cachedRelease;
   DateTime? _cachedReleaseAt;
@@ -126,6 +128,7 @@ class LauncherController extends ChangeNotifier {
     } else {
       hasArtUpdate = false;
     }
+    coverAccent = await CoverAccentLoader.load();
     notifyListeners();
   }
 
@@ -954,11 +957,14 @@ class LauncherController extends ChangeNotifier {
         hasUpdate = false;
       }
 
-      isDownloading = false;
       downloadProgress = 1;
       statusText = kind == 'art'
           ? 'Установка текстур завершена'
           : 'Установка завершена';
+      notifyListeners();
+      await Future<void>.delayed(const Duration(milliseconds: 280));
+      isDownloading = false;
+      downloadProgress = 0;
       addLog(
         kind == 'art'
             ? 'Установка графики и текстур завершена.'

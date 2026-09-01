@@ -10,6 +10,13 @@ import 'package:window_manager/window_manager.dart';
 import '../config/app_constants.dart';
 import '../controllers/launcher_controller.dart';
 import '../telegram_auth_service.dart';
+import '../widgets/effects/animated_status_badge.dart';
+import '../widgets/effects/arcane_hover_border.dart';
+import '../widgets/effects/confetti_burst.dart';
+import '../widgets/effects/epoch_progress_bar.dart';
+import '../widgets/effects/magnetic_hover.dart';
+import '../widgets/effects/rain_glass_overlay.dart';
+import '../widgets/effects/staggered_fade_in.dart';
 import '../widgets/mini_player.dart';
 import 'gift_codes_page.dart';
 import 'login_screen.dart' hide telegramUrl;
@@ -21,7 +28,63 @@ class MainScreen extends StatefulWidget {
   State<MainScreen> createState() => _MainScreenState();
 }
 
+class _LibraryGame {
+  const _LibraryGame({
+    required this.title,
+    required this.iconAssets,
+  });
+
+  final String title;
+  final List<String> iconAssets;
+}
+
+const _libraryGames = [
+  _LibraryGame(
+    title: 'Reverse: 1999',
+    iconAssets: [
+      'assets/images/game_icon.jpg',
+      'assets/images/cover.jpg',
+      'assets/images/launcher_icon.png',
+    ],
+  ),
+];
+
 class _MainScreenState extends State<MainScreen> {
+  final ScrollController _mainScrollController = ScrollController();
+  bool _ctaHighlight = false;
+
+  @override
+  void dispose() {
+    _mainScrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _focusGameInMainPanel(LauncherController controller) async {
+    if (_mainScrollController.hasClients) {
+      await _mainScrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOutCubic,
+      );
+    }
+    if (!mounted) return;
+
+    setState(() => _ctaHighlight = true);
+    await Future<void>.delayed(const Duration(milliseconds: 900));
+    if (mounted) {
+      setState(() => _ctaHighlight = false);
+    }
+
+    if (!mounted) return;
+    if (_primaryActionEnabled(controller)) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(
+          content: Text('Нажмите «Установить» или «Обновить» справа'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
   Future<void> _openExternalLink(String url) async {
     final uri = Uri.parse(url);
     final messenger = ScaffoldMessenger.maybeOf(context);
@@ -52,6 +115,8 @@ class _MainScreenState extends State<MainScreen> {
       if (mounted) {
         final src = controller.lastInstallSource;
         if (src != null) {
+          await showConfettiBurst(context);
+          if (!mounted) return;
           final tgt = controller.lastInstallTarget ?? '';
           final count = controller.lastInstallFileCount;
           await showDialog<void>(
@@ -93,6 +158,8 @@ class _MainScreenState extends State<MainScreen> {
       if (mounted) {
         final src = controller.lastInstallSource;
         if (src != null) {
+          await showConfettiBurst(context);
+          if (!mounted) return;
           final tgt = controller.lastInstallTarget ?? '';
           final count = controller.lastInstallFileCount;
           await showDialog<void>(
@@ -296,6 +363,7 @@ class _MainScreenState extends State<MainScreen> {
   Widget _buildHeroSection(
     LauncherController controller, {
     bool showSocialInCorners = false,
+    bool highlightCta = false,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -310,50 +378,80 @@ class _MainScreenState extends State<MainScreen> {
           children: [
             Expanded(
               flex: 2,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Theme.of(context).colorScheme.primary,
-                  disabledBackgroundColor:
-                      const Color(0xFF2E7D32).withValues(alpha: 0.35),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                onPressed: _primaryActionEnabled(controller)
-                    ? () => _showInstallChoiceDialog(controller)
-                    : null,
-                icon: Icon(
-                  controller.isDownloading
-                      ? Icons.downloading_rounded
-                      : controller.hasUpdate || controller.hasArtUpdate
-                          ? Icons.system_update_alt_rounded
-                          : Icons.download_rounded,
-                  color: Colors.white,
-                ),
-                label: Text(
-                  _primaryActionLabel(controller),
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15,
-                    color: Colors.white,
+              child: MagneticHover(
+                child: ArcaneHoverBorder(
+                  borderRadius: 12,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeOut,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: highlightCta
+                          ? [
+                              BoxShadow(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .primary
+                                    .withValues(alpha: 0.55),
+                                blurRadius: 18,
+                                spreadRadius: 1,
+                              ),
+                            ]
+                          : null,
+                    ),
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor:
+                            Theme.of(context).colorScheme.primary,
+                        disabledBackgroundColor:
+                            const Color(0xFF2E7D32).withValues(alpha: 0.35),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      onPressed: _primaryActionEnabled(controller)
+                          ? () => _showInstallChoiceDialog(controller)
+                          : null,
+                      icon: Icon(
+                        controller.isDownloading
+                            ? Icons.downloading_rounded
+                            : controller.hasUpdate || controller.hasArtUpdate
+                                ? Icons.system_update_alt_rounded
+                                : Icons.download_rounded,
+                        color: Colors.white,
+                      ),
+                      label: Text(
+                        _primaryActionLabel(controller),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
             const SizedBox(width: 10),
-            OutlinedButton(
-              onPressed: () => _showChangelogDialog(controller),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 16,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+            MagneticHover(
+              child: Tooltip(
+                message: 'Список изменений последней версии русификатора',
+                child: OutlinedButton(
+                  onPressed: () => _showChangelogDialog(controller),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 16,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text('Что нового?'),
                 ),
               ),
-              child: const Text('Что нового?'),
             ),
           ],
         ),
@@ -462,14 +560,9 @@ class _MainScreenState extends State<MainScreen> {
           ),
           if (controller.isDownloading) ...[
             const SizedBox(height: 10),
-            LinearProgressIndicator(
-              value: controller.downloadProgress == 0
-                  ? null
-                  : controller.downloadProgress,
-              minHeight: 6,
-              backgroundColor: Theme.of(context).dividerColor,
-              color: Theme.of(context).colorScheme.primary,
-              borderRadius: BorderRadius.circular(4),
+            EpochProgressBar(
+              progress: controller.downloadProgress,
+              indeterminate: controller.downloadProgress == 0,
             ),
           ],
         ],
@@ -740,21 +833,37 @@ class _MainScreenState extends State<MainScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Библиотека',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(context).textTheme.bodyMedium?.color,
-                ),
+              Row(
+                children: [
+                  Text(
+                    'Библиотека',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context).textTheme.bodyMedium?.color,
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    '${_libraryGames.length} ${_libraryGames.length == 1 ? 'игра' : 'игры'}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Theme.of(context).textTheme.bodySmall?.color,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 18),
-              _buildGameListTile('Reverse: 1999', 'v 3.7.0', isActive: true),
-
-              // Spacer выталкивает все, что под ним, в самый низ контейнера
+              const SizedBox(height: 12),
+              for (var i = 0; i < _libraryGames.length; i++)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: StaggeredFadeIn(
+                    index: i,
+                    child: _buildGameListTile(controller, _libraryGames[i]),
+                  ),
+                ),
+              _buildLibraryActivityCard(controller),
               const Spacer(),
-
-              // Вывод нашего нового плеера
               const MiniPlayer(),
             ],
           ),
@@ -773,12 +882,16 @@ class _MainScreenState extends State<MainScreen> {
             ),
             child: LayoutBuilder(
               builder: (context, constraints) => SingleChildScrollView(
+                controller: _mainScrollController,
                 child: ConstrainedBox(
                   constraints: BoxConstraints(minHeight: constraints.maxHeight),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _buildHeroSection(controller),
+                      _buildHeroSection(
+                        controller,
+                        highlightCta: _ctaHighlight,
+                      ),
                       const SizedBox(height: 18),
                       _buildSettingsCard(controller),
                       const SizedBox(height: 20),
@@ -874,7 +987,11 @@ class _MainScreenState extends State<MainScreen> {
               ],
             ),
             const SizedBox(height: 16),
-            _buildHeroSection(controller, showSocialInCorners: true),
+            _buildHeroSection(
+              controller,
+              showSocialInCorners: true,
+              highlightCta: _ctaHighlight,
+            ),
             const SizedBox(height: 16),
             _buildSettingsCard(controller),
             if (!controller.isShizukuActive)
@@ -961,6 +1078,7 @@ class _MainScreenState extends State<MainScreen> {
                 ),
               ),
             ),
+            const Positioned.fill(child: RainGlassOverlay()),
             DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
@@ -1148,88 +1266,56 @@ class _MainScreenState extends State<MainScreen> {
 
   Widget _buildVersionBadge(LauncherController controller) {
     final notInstalled = controller.currentVersion == 'v0.0.0';
-    final Color color;
-    final String label;
-    final IconData icon;
     if (notInstalled) {
-      color = Colors.grey.shade500;
-      label = 'Не установлено';
-      icon = Icons.remove_circle_outline_rounded;
-    } else if (controller.hasUpdate) {
-      color = const Color(0xFFD97706);
-      label = 'Обновление ${controller.remoteVersion}';
-      icon = Icons.upgrade_rounded;
-    } else {
-      color = const Color(0xFF2E7D32);
-      label = controller.currentVersion;
-      icon = Icons.check_circle_rounded;
+      return AnimatedStatusBadge(
+        label: 'Не установлено',
+        color: Colors.grey.shade500,
+        icon: Icons.remove_circle_outline_rounded,
+        kind: StatusBadgeKind.neutral,
+      );
     }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.18),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color, width: 1),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: color, size: 15),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.w700,
-              fontSize: 12,
-            ),
-          ),
-        ],
-      ),
+    if (controller.hasUpdate) {
+      return AnimatedStatusBadge(
+        label: 'Обновление ${controller.remoteVersion}',
+        color: const Color(0xFFD97706),
+        icon: Icons.upgrade_rounded,
+        kind: StatusBadgeKind.updateAvailable,
+      );
+    }
+    return AnimatedStatusBadge(
+      label: controller.currentVersion,
+      color: const Color(0xFF2E7D32),
+      icon: Icons.check_circle_rounded,
+      kind: StatusBadgeKind.installed,
     );
   }
 
   Widget _buildArtVersionBadge(LauncherController controller) {
     final notInstalled = controller.currentArtVersion == 'v0.0.0';
-    final Color color;
-    final String label;
-    final IconData icon;
     if (notInstalled) {
-      color = Colors.grey.shade500;
-      label = 'Не установлено';
-      icon = Icons.remove_circle_outline_rounded;
-    } else if (controller.hasArtUpdate) {
-      color = const Color(0xFFD97706);
-      label = 'Обновление ${controller.remoteArtVersion}';
-      icon = Icons.upgrade_rounded;
-    } else {
-      color = const Color(0xFF2E7D32);
-      label = controller.currentArtVersion;
-      icon = Icons.check_circle_rounded;
+      return AnimatedStatusBadge(
+        label: 'Не установлено',
+        color: Colors.grey.shade500,
+        icon: Icons.remove_circle_outline_rounded,
+        kind: StatusBadgeKind.neutral,
+        compact: true,
+      );
     }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.16),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color, width: 1),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: color, size: 14),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.w700,
-              fontSize: 11,
-            ),
-          ),
-        ],
-      ),
+    if (controller.hasArtUpdate) {
+      return AnimatedStatusBadge(
+        label: 'Обновление ${controller.remoteArtVersion}',
+        color: const Color(0xFFD97706),
+        icon: Icons.upgrade_rounded,
+        kind: StatusBadgeKind.updateAvailable,
+        compact: true,
+      );
+    }
+    return AnimatedStatusBadge(
+      label: controller.currentArtVersion,
+      color: const Color(0xFF2E7D32),
+      icon: Icons.check_circle_rounded,
+      kind: StatusBadgeKind.installed,
+      compact: true,
     );
   }
 
@@ -1238,28 +1324,31 @@ class _MainScreenState extends State<MainScreen> {
   /// (Telegram channel) access. Gold was chosen (rather than plain grey) so
   /// it reads as "premium/PRO feature" instead of a generic disabled state.
   Widget _buildPremiumLockBadge() {
-    const color = Color(0xFFC9A227); // gold accent for the "PRO" lock state
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.16),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color, width: 1),
-      ),
-      child: const Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.lock_rounded, color: color, size: 14),
-          SizedBox(width: 6),
-          Text(
-            'Только Premium',
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.w700,
-              fontSize: 11,
+    const color = Color(0xFFC9A227);
+    return Tooltip(
+      message: 'Доступно участникам премиум-канала SOLIDLEAF TEAM',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.16),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color, width: 1),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.lock_rounded, color: color, size: 14),
+            SizedBox(width: 6),
+            Text(
+              'Только Premium',
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w700,
+                fontSize: 11,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1422,12 +1511,10 @@ class _MainScreenState extends State<MainScreen> {
             ),
             if (showDownloadProgress) ...[
               const SizedBox(height: 12),
-              LinearProgressIndicator(
-                value: downloadProgress == 0 ? null : downloadProgress,
-                minHeight: 5,
-                backgroundColor: Theme.of(context).dividerColor,
-                color: Theme.of(context).colorScheme.primary,
-                borderRadius: BorderRadius.circular(4),
+              EpochProgressBar(
+                progress: downloadProgress,
+                indeterminate: downloadProgress == 0,
+                height: 5,
               ),
             ],
           ],
@@ -1452,67 +1539,171 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  Widget _buildGameListTile(
-    String title,
-    String version, {
-    required bool isActive,
-  }) {
+  Widget _buildLibraryActivityCard(LauncherController controller) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(top: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: isActive
-            ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.15)
-            : Colors.transparent,
+        color: Theme.of(context).scaffoldBackgroundColor.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(12),
-        border: isActive
-            ? Border.all(color: Theme.of(context).colorScheme.primary, width: 1)
-            : null,
+        border: Border.all(color: Theme.of(context).dividerColor),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: Theme.of(context).dividerColor,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(
-              Icons.gamepad_rounded,
-              color: Theme.of(context).textTheme.bodySmall?.color,
-            ),
+          Icon(
+            Icons.history_rounded,
+            size: 16,
+            color: Theme.of(context).textTheme.bodySmall?.color,
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 8),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  title,
+                  'Последняя активность',
                   style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Theme.of(context).textTheme.bodyMedium?.color,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.2,
+                    color: Theme.of(context).textTheme.bodySmall?.color,
                   ),
                 ),
+                const SizedBox(height: 3),
                 Text(
-                  version,
+                  controller.statusText,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: Theme.of(context).textTheme.bodySmall?.color,
-                    fontSize: 12,
+                    fontSize: 11,
+                    height: 1.3,
+                    color: Theme.of(context).textTheme.bodyMedium?.color,
                   ),
                 ),
               ],
             ),
           ),
-          if (isActive)
-            Icon(
-              Icons.check_circle_rounded,
-              color: Theme.of(context).colorScheme.primary,
-              size: 18,
-            ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildGameIcon(List<String> assets, {double size = 52}) {
+    Widget imageAt(int index) {
+      if (index >= assets.length) {
+        return ColoredBox(
+          color: Theme.of(context).dividerColor,
+          child: Icon(
+            Icons.gamepad_rounded,
+            color: Theme.of(context).textTheme.bodySmall?.color,
+          ),
+        );
+      }
+
+      return Image.asset(
+        assets[index],
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => imageAt(index + 1),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: imageAt(0),
+      ),
+    );
+  }
+
+  Widget _buildGameListTile(LauncherController controller, _LibraryGame game) {
+    final installed = controller.currentVersion != 'v0.0.0';
+    final versionLabel = installed
+        ? controller.currentVersion
+        : 'Русификатор не установлен';
+    final statusColor = controller.hasUpdate
+        ? const Color(0xFFD97706)
+        : installed
+            ? const Color(0xFF2E7D32)
+            : Theme.of(context).textTheme.bodySmall?.color;
+
+    return ArcaneHoverBorder(
+      borderRadius: 14,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => _focusGameInMainPanel(controller),
+          child: Ink(
+          width: double.infinity,
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.55),
+              width: 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              _buildGameIcon(game.iconAssets),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      game.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Theme.of(context).textTheme.bodyMedium?.color,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      versionLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: statusColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    if (controller.hasUpdate) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        'Доступно ${controller.remoteVersion}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFFD97706),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              Icon(
+                controller.hasUpdate
+                    ? Icons.system_update_alt_rounded
+                    : Icons.chevron_right_rounded,
+                color: statusColor,
+                size: 18,
+              ),
+            ],
+          ),
+        ),
+      ),
       ),
     );
   }
@@ -1523,23 +1714,25 @@ class _MainScreenState extends State<MainScreen> {
     VoidCallback? onTap,
     String tooltip = '',
   }) {
-    final button = Container(
-      width: 52,
-      height: 52,
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: active
-            ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.2)
-            : Colors.transparent,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: IconButton(
-        onPressed: onTap ?? () {},
-        icon: Icon(
-          icon,
+    final button = MagneticHover(
+      child: Container(
+        width: 52,
+        height: 52,
+        margin: const EdgeInsets.only(bottom: 10),
+        decoration: BoxDecoration(
           color: active
-              ? Theme.of(context).colorScheme.primary
-              : Theme.of(context).textTheme.bodySmall?.color,
+              ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.2)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: IconButton(
+          onPressed: onTap ?? () {},
+          icon: Icon(
+            icon,
+            color: active
+                ? Theme.of(context).colorScheme.primary
+                : Theme.of(context).textTheme.bodySmall?.color,
+          ),
         ),
       ),
     );
