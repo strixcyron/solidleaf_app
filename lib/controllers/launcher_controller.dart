@@ -174,8 +174,10 @@ class LauncherController extends ChangeNotifier {
     currentVersion = prefs.getString('installed_version') ?? 'v0.0.0';
     currentArtVersion = prefs.getString('installed_art_version') ?? 'v0.0.0';
     installPath = await _resolveInstallPath(prefs);
-    isInstallPathValid = GamePathFinder.isValidGamePath(installPath);
-    if (isInstallPathValid) {
+    isInstallPathValid = GamePathFinder.isValidInstallPath(installPath);
+    if (Platform.isAndroid) {
+      addLog('Путь установки (Android): $installPath');
+    } else if (isInstallPathValid) {
       addLog('Папка игры: $installPath');
     } else if (Platform.isWindows) {
       addLog(
@@ -208,15 +210,15 @@ class LauncherController extends ChangeNotifier {
 
   static const _gameDataFolderHint = 'reverse1999_Data';
 
-  /// Сначала сохранённый путь, затем автопоиск на Windows, иначе подсказка.
+  /// На Android — только захардкоженный путь; на Windows — сохранённый или автопоиск.
   Future<String> _resolveInstallPath(SharedPreferences prefs) async {
+    if (Platform.isAndroid) {
+      return GamePathFinder.androidInstallPath;
+    }
+
     final saved = prefs.getString(GamePathFinder.prefsKey);
     if (saved != null && GamePathFinder.isValidGamePath(saved)) {
       return saved;
-    }
-
-    if (Platform.isAndroid) {
-      return '/storage/emulated/0/Android/data/com.bluepoch.m.en.reverse1999/';
     }
 
     if (Platform.isWindows) {
@@ -236,7 +238,7 @@ class LauncherController extends ChangeNotifier {
   }
 
   void _refreshInstallPathState() {
-    isInstallPathValid = GamePathFinder.isValidGamePath(installPath);
+    isInstallPathValid = GamePathFinder.isValidInstallPath(installPath);
   }
 
   void addLog(String message) {
@@ -1079,10 +1081,8 @@ class LauncherController extends ChangeNotifier {
   }
 
   Future<void> installOrUpdate() async {
-    if (!isInstallPathValid) {
-      if (Platform.isWindows) {
-        await detectInstallPath();
-      }
+    if (!Platform.isAndroid && !isInstallPathValid) {
+      await detectInstallPath();
       if (!isInstallPathValid) {
         statusText = 'Укажите папку с установленной игрой';
         addLog(statusText);
@@ -1114,10 +1114,8 @@ class LauncherController extends ChangeNotifier {
       return;
     }
 
-    if (!isInstallPathValid) {
-      if (Platform.isWindows) {
-        await detectInstallPath();
-      }
+    if (!Platform.isAndroid && !isInstallPathValid) {
+      await detectInstallPath();
       if (!isInstallPathValid) {
         statusText = 'Укажите папку с установленной игрой';
         addLog(statusText);

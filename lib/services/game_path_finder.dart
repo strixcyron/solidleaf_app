@@ -6,10 +6,14 @@ import 'package:path/path.dart' as p;
 class GamePathFinder {
   GamePathFinder._();
 
-  /// Ключ в SharedPreferences для пути, выбранного пользователем.
+  /// Ключ в SharedPreferences для пути, выбранного пользователем (только Windows).
   static const prefsKey = 'install_path';
 
-  /// Папка данных Unity — надёжный признак корня установки игры.
+  /// Фиксированный путь к данным игры на Android — выбор папки не нужен.
+  static const androidInstallPath =
+      '/storage/emulated/0/Android/data/com.bluepoch.m.en.reverse1999/';
+
+  /// Папка данных Unity — признак корня установки на Windows.
   static const _dataFolderName = 'reverse1999_Data';
 
   /// Типичные пути от корня диска: глобальная и Steam-версия.
@@ -18,7 +22,15 @@ class GamePathFinder {
     r'Steam\steamapps\common\Reverse 1999',
   ];
 
-  /// Проверяет, что в [dirPath] лежит установленная игра.
+  /// Проверяет, что путь установки подходит для текущей платформы.
+  static bool isValidInstallPath(String dirPath) {
+    if (Platform.isAndroid) {
+      return p.normalize(dirPath) == p.normalize(androidInstallPath);
+    }
+    return isValidGamePath(dirPath);
+  }
+
+  /// Проверяет, что в [dirPath] лежит установленная игра (Windows).
   static bool isValidGamePath(String dirPath) {
     if (dirPath.isEmpty || dirPath.startsWith('Укажите')) {
       return false;
