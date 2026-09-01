@@ -10,18 +10,34 @@ dependencies:
   dio: ^5.7.0
   file_picker: ^8.0.0
   fluentui_system_icons: ^1.1.231
+  flutter_secure_storage: ^9.2.2
   path_provider: ^2.1.5
   path: ^1.9.0
   provider: ^6.1.2
   shared_preferences: ^2.3.1
+  url_launcher: ^6.3.1
   window_manager: ^0.4.3
+  audioplayers: ^6.0.0 # Актуальная версия пакета
+  text_scroll: ^0.2.0
+  squiggly_slider: ^1.0.5
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter_icons:
+  android: true
+  ios: false
+  image_path: "assets/images/launcher_icon.png"
+  adaptive_icon_background: "assets/images/launcher_icon.png"
+  adaptive_icon_foreground: "assets/images/launcher_icon.png"
 
 flutter:
   uses-material-design: true
   assets:
     - assets/images/
+    - assets/music/
+    - assets/images/music_cover/ # Папка, для фоновой музыки
+
