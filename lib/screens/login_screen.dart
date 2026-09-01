@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../config/github_config.dart';
 import '../controllers/launcher_controller.dart';
 import '../telegram_auth_service.dart';
 import 'main_screen.dart';
@@ -116,6 +117,7 @@ class _LoginScreenState extends State<LoginScreen> {
         // After successful login, re-check updates
         // so that the backend can use the JWT to determine which release to return
         final controller = context.read<LauncherController>();
+        await GitHubConfig.warmUp();
         await controller.refreshPremiumStatus();
         await controller.checkForUpdates();
         if (controller.isPremium) {

@@ -2,9 +2,20 @@
 const String githubFreeLatestReleaseUrl =
     'https://api.github.com/repos/strixcyron/SOLIDLEAF-TEAM/releases/latest';
 
+/// Fallback for the public repo when it publishes under the named `update`
+/// tag instead of a GitHub "latest" release (mirrors the auth backend logic).
+const String githubFreeTagReleaseUrl =
+    'https://api.github.com/repos/strixcyron/SOLIDLEAF-TEAM/releases/tags/update';
+
 /// Private premium localization + texture releases.
 const String githubPremiumLatestReleaseUrl =
     'https://api.github.com/repos/FrauxHD/PREMIUM/releases/latest';
+
+/// Fallback for the premium repo: it ships its release under the named
+/// `update` tag, so `/releases/latest` can 404 while this returns 200. The
+/// auth backend already relies on this same fallback.
+const String githubPremiumTagReleaseUrl =
+    'https://api.github.com/repos/FrauxHD/PREMIUM/releases/tags/update';
 
 const String shizukuChannel = 'com.example.re_1999_solidleaf/shizuku';
 const String boostyUrl = 'https://boosty.to/strix.cyron/donate';

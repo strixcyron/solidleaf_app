@@ -82,6 +82,15 @@ class LauncherController extends ChangeNotifier {
   String get _activeReleaseApiUrl =>
       isPremium ? githubPremiumLatestReleaseUrl : githubFreeLatestReleaseUrl;
 
+  /// Ordered list of endpoints to try for the active tier. Both repos may
+  /// expose their release under the named `update` tag rather than as a
+  /// GitHub "latest" release, so `/releases/latest` can 404 even with a valid
+  /// token; we then fall back to `/releases/tags/update` (same approach the
+  /// auth backend uses server-side).
+  List<String> get _activeReleaseApiUrls => isPremium
+      ? const [githubPremiumLatestReleaseUrl, githubPremiumTagReleaseUrl]
+      : const [githubFreeLatestReleaseUrl, githubFreeTagReleaseUrl];
+
   String get _activeReleaseRepoLabel =>
       isPremium ? 'FrauxHD/PREMIUM' : 'strixcyron/SOLIDLEAF-TEAM';
 
@@ -92,11 +101,13 @@ class LauncherController extends ChangeNotifier {
     };
 
     if (isPremium) {
-      final token = GitHubConfig.premiumToken;
-      if (token.isEmpty) {
-        throw Exception('GITHUB_TOKEN не настроен. ${GitHubConfig.setupHint}');
+      if (!GitHubConfig.hasPremiumToken) {
+        throw Exception(
+          'GITHUB_TOKEN не настроен. [${GitHubConfig.debugState}] '
+          '${GitHubConfig.setupHint}',
+        );
       }
-      headers['Authorization'] = 'Bearer $token';
+      headers['Authorization'] = 'Bearer ${GitHubConfig.premiumToken}';
     }
 
     return headers;
@@ -115,6 +126,8 @@ class LauncherController extends ChangeNotifier {
     currentArtVersion = prefs.getString('installed_art_version') ?? 'v0.0.0';
     installPath = _defaultInstallPath();
     await GitHubConfig.warmUp();
+    debugPrint('[GitHubConfig] ${GitHubConfig.debugState}');
+    addLog('GitHub token — ${GitHubConfig.debugState}');
     await refreshPremiumStatus();
     if (Platform.isAndroid) {
       await checkShizukuStatus();
@@ -654,8 +667,41 @@ class LauncherController extends ChangeNotifier {
     }
   }
 
+  /// Diagnostic: which GitHub account does the currently-sent token map to,
+  /// and does it see the premium repo? Uses the SAME headers as the failing
+  /// request so we can tell whether the in-app token differs from expectations.
+  Future<String> _diagnoseTokenIdentity(Map<String, String> headers) async {
+    String user = 'user=?';
+    String repo = 'repo=?';
+    try {
+      final u = await _dio.get<dynamic>(
+        'https://api.github.com/user',
+        options: Options(headers: headers, validateStatus: (_) => true),
+      );
+      if (u.statusCode == 200 && u.data is Map) {
+        user = 'user=${(u.data as Map)['login']}';
+      } else {
+        user = 'user_status=${u.statusCode}';
+      }
+    } catch (e) {
+      user = 'user_err';
+    }
+    try {
+      final r = await _dio.get<dynamic>(
+        'https://api.github.com/repos/FrauxHD/PREMIUM',
+        options: Options(headers: headers, validateStatus: (_) => true),
+      );
+      repo = 'repo_status=${r.statusCode}';
+    } catch (e) {
+      repo = 'repo_err';
+    }
+    final diag = '$user, $repo';
+    addLog('Диагностика токена: $diag');
+    return diag;
+  }
+
   Future<Map<String, dynamic>> _fetchLatestRelease({bool force = false}) async {
-    await GitHubConfig.warmUp();
+    await GitHubConfig.warmUp(force: !GitHubConfig.hasPremiumToken);
 
     if (!force &&
         _cachedRelease != null &&
@@ -665,50 +711,79 @@ class LauncherController extends ChangeNotifier {
       return _cachedRelease!;
     }
 
-    // Free repo is public — no Authorization header.
-    // Premium repo is private — requires GITHUB_TOKEN (see GitHubConfig).
-    // validateStatus lets us handle 401/403/404 below with repo-aware
-    // messages instead of Dio throwing a generic DioException first.
-    final response = await _dio
-        .get(
-          _activeReleaseApiUrl,
-          options: Options(
-            headers: _releaseRequestHeaders(),
-            validateStatus: (_) => true,
-          ),
-        )
-        .timeout(const Duration(seconds: 15));
+    final headers = _releaseRequestHeaders();
+    addLog('GitHub → $_activeReleaseRepoLabel [${GitHubConfig.debugState}]');
 
-    final status = response.statusCode ?? 0;
-    if (status == 401) {
-      throw Exception(
-        'GitHub отклонил авторизацию (401). Проверьте GITHUB_TOKEN для $_activeReleaseRepoLabel.',
+    final urls = _activeReleaseApiUrls;
+    int lastStatus = 0;
+    bool lastSentAuth = false;
+    String? lastGhMessage;
+
+    for (var i = 0; i < urls.length; i++) {
+      final url = urls[i];
+      final response = await _dio.get<dynamic>(
+        url,
+        options: Options(
+          headers: headers,
+          validateStatus: (_) => true,
+          responseType: ResponseType.json,
+        ),
       );
-    }
-    if (status == 403 || status == 429) {
-      throw Exception('Превышен лимит запросов к GitHub. Попробуйте позже.');
-    }
-    if (status == 404) {
-      if (isPremium) {
+
+      final status = response.statusCode ?? 0;
+      final sentAuth =
+          response.requestOptions.headers.containsKey('Authorization');
+      final ghMessage = response.data is Map
+          ? (response.data as Map)['message']?.toString()
+          : null;
+      addLog(
+        'GitHub ответил $status (auth=$sentAuth, msg=${ghMessage ?? "—"}) '
+        '${url.endsWith("/latest") ? "[latest]" : "[tags/update]"}',
+      );
+
+      lastStatus = status;
+      lastSentAuth = sentAuth;
+      lastGhMessage = ghMessage;
+
+      // Auth/rate-limit failures are terminal — trying the next URL won't help.
+      if (status == 401) {
         throw Exception(
-          'Премиум-релиз в $_activeReleaseRepoLabel недоступен (404). '
-          'Обычно это значит, что GITHUB_TOKEN не задан или не имеет доступа '
-          'к приватному репозиторию. ${GitHubConfig.setupHint}',
+          'GitHub отклонил авторизацию (401). Проверьте GITHUB_TOKEN для $_activeReleaseRepoLabel.',
         );
       }
-      throw Exception(
-        'Релиз не найден в репозитории $_activeReleaseRepoLabel.',
-      );
-    }
-    if (status != 200 || response.data == null) {
-      throw Exception('Ошибка сервера GitHub: $status');
+      if (status == 403 || status == 429) {
+        throw Exception('Превышен лимит запросов к GitHub. Попробуйте позже.');
+      }
+
+      if (status == 200 && response.data != null) {
+        final data = Map<String, dynamic>.from(response.data as Map);
+        _cachedRelease = data;
+        _cachedReleaseAt = DateTime.now();
+        _cachedReleaseIsPremium = isPremium;
+        return data;
+      }
+
+      // 404 → the release may live under the named tag instead; try next URL.
+      if (status == 404 && i < urls.length - 1) {
+        continue;
+      }
+      if (status != 404) {
+        throw Exception('Ошибка сервера GitHub: $status');
+      }
     }
 
-    final data = Map<String, dynamic>.from(response.data as Map);
-    _cachedRelease = data;
-    _cachedReleaseAt = DateTime.now();
-    _cachedReleaseIsPremium = isPremium;
-    return data;
+    // All candidate URLs returned 404.
+    if (isPremium) {
+      final who = await _diagnoseTokenIdentity(headers);
+      throw Exception(
+        'Премиум-релиз в $_activeReleaseRepoLabel недоступен (404). '
+        'GitHub: "${lastGhMessage ?? "Not Found"}", auth=$lastSentAuth, $who. '
+        '[${GitHubConfig.debugState}]',
+      );
+    }
+    throw Exception(
+      'Релиз не найден в репозитории $_activeReleaseRepoLabel (HTTP $lastStatus).',
+    );
   }
 
   List<Map<String, dynamic>> _releaseAssets(Map<String, dynamic> release) {
@@ -1301,10 +1376,15 @@ class LauncherController extends ChangeNotifier {
     } else if (exception.response?.statusCode == 403) {
       message = 'GitHub API ограничил число запросов. Попробуйте позже.';
     } else if (exception.response?.statusCode == 404) {
+      final sentAuth =
+          exception.requestOptions.headers.containsKey('Authorization');
+      final ghMessage = exception.response?.data is Map
+          ? (exception.response!.data as Map)['message']?.toString()
+          : null;
       message = isPremium
           ? 'Премиум-релиз в $_activeReleaseRepoLabel недоступен (404). '
-              'Проверьте GITHUB_TOKEN — без доступа к приватному репозиторию '
-              'GitHub отвечает 404.'
+              'GitHub: "${ghMessage ?? "Not Found"}", auth=$sentAuth. '
+              '[${GitHubConfig.debugState}]'
           : 'Релиз не найден в репозитории $_activeReleaseRepoLabel.';
     } else if (exception.error != null) {
       message = exception.error.toString();

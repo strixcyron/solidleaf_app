@@ -23,43 +23,113 @@ class GitHubConfig {
   GitHubConfig._();
 
   static String? _cachedToken;
-  static bool _warmUpDone = false;
+  static String _debugSource = 'none';
+  static String _debugPath = '?';
 
-  /// Call once during app startup before any premium GitHub API request.
-  static Future<void> warmUp() async {
-    if (_warmUpDone) {
-      return;
-    }
-    _warmUpDone = true;
+  /// Whether a value looks like a real GitHub token rather than a placeholder
+  /// (e.g. the `YOUR_GITHUB_PAT_HERE` sample) accidentally left in a config.
+  static bool looksLikeToken(String value) {
+    final v = sanitizeToken(value);
+    if (v.length < 20) return false;
+    if (v.startsWith('YOUR_')) return false;
+    return v.startsWith('ghp_') ||
+        v.startsWith('github_pat_') ||
+        v.startsWith('gho_') ||
+        v.startsWith('ghs_') ||
+        v.startsWith('ghu_');
+  }
 
+  static String sanitizeToken(String raw) {
+    return raw
+        .replaceAll('\uFEFF', '')
+        .replaceAll(RegExp(r'[\s\r\n]'), '')
+        .trim();
+  }
+
+  /// Load the token from every available source.
+  ///
+  /// Project secret files are re-read on EVERY call (not just when [force] is
+  /// set): they are the source of truth for local dev, and re-reading them is
+  /// what lets a mid-session token change take effect without a full restart.
+  ///
+  /// This matters specifically for hot reload: [_cachedToken] is `static`, so
+  /// a hot reload swaps in new code but keeps the token that was cached at the
+  /// first launch. Previously an early `return` pinned that first token, so an
+  /// old/expired token kept being sent — and GitHub returns 404 (not 401) for
+  /// a *private* repo a token can't see, which looks exactly like "release not
+  /// found". Always re-reading the file avoids that stale-token trap.
+  static Future<void> warmUp({bool force = false}) async {
     const fromEnv = String.fromEnvironment('GITHUB_TOKEN', defaultValue: '');
-    if (fromEnv.isNotEmpty) {
-      _cachedToken = fromEnv;
-      return;
-    }
+    final envToken = sanitizeToken(fromEnv);
 
+    // 1) Project secret files — always re-read so file edits win immediately.
     final projectRoot = _findProjectRoot();
     if (projectRoot != null) {
-      _cachedToken = _readTokenFromDirectory(projectRoot);
-      if (_cachedToken != null) {
+      final fromProject = _readTokenFromDirectory(projectRoot);
+      if (looksLikeToken(fromProject ?? '')) {
+        final token = sanitizeToken(fromProject!);
+        _debugSource = 'project-file';
+        if (token != _cachedToken) {
+          _cachedToken = token;
+          await _persistToken(token);
+        }
         return;
       }
     }
 
-    if (Platform.isAndroid || Platform.isIOS) {
-      _cachedToken = await _readTokenFromAppSupport();
+    // No usable project file — reuse the resolved token unless forced.
+    if (!force && looksLikeToken(_cachedToken ?? '')) {
+      return;
+    }
+    _cachedToken = null;
+    _debugSource = 'none';
+
+    // 2) App-support cache (survives when the exe cwd is not the repo root).
+    final fromSupport = await _readTokenFromAppSupport();
+    if (looksLikeToken(fromSupport ?? '')) {
+      _cachedToken = sanitizeToken(fromSupport!);
+      _debugSource = 'app-support';
+      _debugPath = 'app-support/github_token.txt';
+      return;
+    }
+
+    // 3) Compile-time --dart-define (release / CI builds).
+    if (looksLikeToken(envToken)) {
+      _cachedToken = envToken;
+      _debugSource = 'dart-define';
+      _debugPath = 'env';
+      return;
     }
   }
 
   /// PAT used only for authenticated requests to the private premium repo.
   static String get premiumToken => _cachedToken ?? '';
 
-  static bool get hasPremiumToken => premiumToken.isNotEmpty;
+  static bool get hasPremiumToken => looksLikeToken(premiumToken);
+
+  /// Short, non-sensitive description of where the token came from and its
+  /// shape — safe to surface in logs (never prints the token itself).
+  static String get debugState {
+    final t = premiumToken;
+    if (!looksLikeToken(t)) {
+      return 'token: none (source=$_debugSource root=${_findProjectRoot() ?? "?"})';
+    }
+    return 'token: len=${t.length} prefix=${t.substring(0, 4)} '
+        'source=$_debugSource path=$_debugPath';
+  }
 
   static String? _findProjectRoot() {
+    final starts = <String>{};
     try {
-      var dir = Directory.current;
-      for (var depth = 0; depth < 10; depth++) {
+      starts.add(Directory.current.path);
+      starts.add(File(Platform.resolvedExecutable).parent.path);
+    } catch (_) {
+      // Ignore filesystem errors on restricted platforms.
+    }
+
+    for (final start in starts) {
+      var dir = Directory(start);
+      for (var depth = 0; depth < 12; depth++) {
         if (File(p.join(dir.path, 'pubspec.yaml')).existsSync()) {
           return dir.path;
         }
@@ -69,8 +139,6 @@ class GitHubConfig {
         }
         dir = parent;
       }
-    } catch (_) {
-      // Ignore filesystem errors on restricted platforms.
     }
     return null;
   }
@@ -79,7 +147,7 @@ class GitHubConfig {
     for (final relative in [
       p.join('secrets', 'github_token.txt'),
       'github_token.txt',
-      p.join('dart_defines.local.json'),
+      'dart_defines.local.json',
       'dart_defines.json',
     ]) {
       final file = File(p.join(root, relative));
@@ -91,8 +159,11 @@ class GitHubConfig {
         try {
           final data = jsonDecode(file.readAsStringSync());
           if (data is Map<String, dynamic>) {
-            final token = (data['GITHUB_TOKEN'] ?? '').toString().trim();
-            if (token.isNotEmpty) {
+            final token = sanitizeToken(
+              (data['GITHUB_TOKEN'] ?? '').toString(),
+            );
+            if (looksLikeToken(token)) {
+              _debugPath = file.path;
               return token;
             }
           }
@@ -102,8 +173,9 @@ class GitHubConfig {
         continue;
       }
 
-      final token = file.readAsStringSync().trim();
-      if (token.isNotEmpty && !token.startsWith('YOUR_')) {
+      final token = sanitizeToken(file.readAsStringSync());
+      if (looksLikeToken(token)) {
+        _debugPath = file.path;
         return token;
       }
     }
@@ -117,10 +189,19 @@ class GitHubConfig {
       if (!file.existsSync()) {
         return null;
       }
-      final token = file.readAsStringSync().trim();
-      return token.isNotEmpty ? token : null;
+      final token = sanitizeToken(file.readAsStringSync());
+      return looksLikeToken(token) ? token : null;
     } catch (_) {
       return null;
+    }
+  }
+
+  static Future<void> _persistToken(String token) async {
+    try {
+      final dir = await getApplicationSupportDirectory();
+      await File(p.join(dir.path, 'github_token.txt')).writeAsString(token);
+    } catch (_) {
+      // Best-effort cache for the next launch.
     }
   }
 
