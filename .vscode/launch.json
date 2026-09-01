@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "re_1999_solidleaf (local secrets)",
+      "name": "re_1999_solidleaf",
       "request": "launch",
       "type": "dart",
       "toolArgs": [
@@ -10,7 +10,7 @@
       ]
     },
     {
-      "name": "re_1999_solidleaf",
+      "name": "re_1999_solidleaf (no secrets)",
       "request": "launch",
       "type": "dart"
     }

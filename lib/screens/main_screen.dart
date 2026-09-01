@@ -461,6 +461,7 @@ class _MainScreenState extends State<MainScreen> {
 
   Widget _buildSettingsCard(LauncherController controller) {
     final isPremium = controller.isPremium;
+    final isAndroidUi = Platform.isAndroid;
     final accountColor =
         isPremium ? const Color(0xFFC9A227) : Colors.grey.shade500;
     final accountIcon = isPremium
@@ -507,42 +508,44 @@ class _MainScreenState extends State<MainScreen> {
               ),
             ],
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 10),
-            child: Divider(
-              height: 1,
-              color: Theme.of(context).dividerColor,
+          if (!isAndroidUi) ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: Divider(
+                height: 1,
+                color: Theme.of(context).dividerColor,
+              ),
             ),
-          ),
-          Row(
-            children: [
-              Icon(
-                Icons.folder_outlined,
-                size: 18,
-                color: Theme.of(context).textTheme.bodySmall?.color,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  controller.installPath,
-                  style: TextStyle(
-                    color: Theme.of(context).textTheme.bodySmall?.color,
-                    fontFamily: 'Consolas',
-                    fontSize: 12,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              IconButton(
-                onPressed: controller.selectInstallPath,
-                icon: Icon(
-                  Icons.folder_open_rounded,
+            Row(
+              children: [
+                Icon(
+                  Icons.folder_outlined,
+                  size: 18,
                   color: Theme.of(context).textTheme.bodySmall?.color,
                 ),
-                tooltip: 'Выбрать папку',
-              ),
-            ],
-          ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    controller.installPath,
+                    style: TextStyle(
+                      color: Theme.of(context).textTheme.bodySmall?.color,
+                      fontFamily: 'Consolas',
+                      fontSize: 12,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                IconButton(
+                  onPressed: controller.selectInstallPath,
+                  icon: Icon(
+                    Icons.folder_open_rounded,
+                    color: Theme.of(context).textTheme.bodySmall?.color,
+                  ),
+                  tooltip: 'Выбрать папку',
+                ),
+              ],
+            ),
+          ],
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 10),
             child: Divider(

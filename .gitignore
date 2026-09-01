@@ -44,6 +44,7 @@ dart_defines.local.json
 dart_defines.json
 secrets/github_token.txt
 github_token.txt
+lib/**/github_token.txt
 
 # Android Studio will place build artifacts here
 /android/app/debug

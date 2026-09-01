@@ -94,11 +94,7 @@ class LauncherController extends ChangeNotifier {
     if (isPremium) {
       final token = GitHubConfig.premiumToken;
       if (token.isEmpty) {
-        throw Exception(
-          'GITHUB_TOKEN не настроен. Создайте secrets/github_token.txt '
-          'или dart_defines.local.json (см. dart_defines.local.json.example), '
-          'либо соберите с --dart-define=GITHUB_TOKEN=<ваш_токен>.',
-        );
+        throw Exception('GITHUB_TOKEN не настроен. ${GitHubConfig.setupHint}');
       }
       headers['Authorization'] = 'Bearer $token';
     }
@@ -118,6 +114,7 @@ class LauncherController extends ChangeNotifier {
     currentVersion = prefs.getString('installed_version') ?? 'v0.0.0';
     currentArtVersion = prefs.getString('installed_art_version') ?? 'v0.0.0';
     installPath = _defaultInstallPath();
+    await GitHubConfig.warmUp();
     await refreshPremiumStatus();
     if (Platform.isAndroid) {
       await checkShizukuStatus();
@@ -658,6 +655,8 @@ class LauncherController extends ChangeNotifier {
   }
 
   Future<Map<String, dynamic>> _fetchLatestRelease({bool force = false}) async {
+    await GitHubConfig.warmUp();
+
     if (!force &&
         _cachedRelease != null &&
         _cachedReleaseAt != null &&
@@ -668,10 +667,15 @@ class LauncherController extends ChangeNotifier {
 
     // Free repo is public — no Authorization header.
     // Premium repo is private — requires GITHUB_TOKEN (see GitHubConfig).
+    // validateStatus lets us handle 401/403/404 below with repo-aware
+    // messages instead of Dio throwing a generic DioException first.
     final response = await _dio
         .get(
           _activeReleaseApiUrl,
-          options: Options(headers: _releaseRequestHeaders()),
+          options: Options(
+            headers: _releaseRequestHeaders(),
+            validateStatus: (_) => true,
+          ),
         )
         .timeout(const Duration(seconds: 15));
 
@@ -685,6 +689,13 @@ class LauncherController extends ChangeNotifier {
       throw Exception('Превышен лимит запросов к GitHub. Попробуйте позже.');
     }
     if (status == 404) {
+      if (isPremium) {
+        throw Exception(
+          'Премиум-релиз в $_activeReleaseRepoLabel недоступен (404). '
+          'Обычно это значит, что GITHUB_TOKEN не задан или не имеет доступа '
+          'к приватному репозиторию. ${GitHubConfig.setupHint}',
+        );
+      }
       throw Exception(
         'Релиз не найден в репозитории $_activeReleaseRepoLabel.',
       );
@@ -1290,7 +1301,11 @@ class LauncherController extends ChangeNotifier {
     } else if (exception.response?.statusCode == 403) {
       message = 'GitHub API ограничил число запросов. Попробуйте позже.';
     } else if (exception.response?.statusCode == 404) {
-      message = 'Релиз не найден. Проверьте репозиторий SOLIDLEAF-TEAM.';
+      message = isPremium
+          ? 'Премиум-релиз в $_activeReleaseRepoLabel недоступен (404). '
+              'Проверьте GITHUB_TOKEN — без доступа к приватному репозиторию '
+              'GitHub отвечает 404.'
+          : 'Релиз не найден в репозитории $_activeReleaseRepoLabel.';
     } else if (exception.error != null) {
       message = exception.error.toString();
     }
