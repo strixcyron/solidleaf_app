@@ -908,14 +908,7 @@ class _MainScreenState extends State<MainScreen> {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      _buildComponentTile(
-                        icon: Icons.translate_rounded,
-                        title: 'Текстовая локализация',
-                        subtitle: 'Перевод сюжета и внутриигровых меню',
-                        trailing: _buildVersionBadge(controller),
-                        showDownloadProgress: controller.isDownloadingText,
-                        downloadProgress: controller.downloadProgress,
-                      ),
+                      _buildTextLocalizationTile(controller),
                       const SizedBox(height: 10),
                       _buildComponentTile(
                         icon: Icons.image_rounded,
@@ -1021,14 +1014,7 @@ class _MainScreenState extends State<MainScreen> {
               ),
             ),
             const SizedBox(height: 12),
-            _buildComponentTile(
-              icon: Icons.translate_rounded,
-              title: 'Текстовая локализация',
-              subtitle: 'Перевод сюжета и внутриигровых меню',
-              trailing: _buildVersionBadge(controller),
-              showDownloadProgress: controller.isDownloadingText,
-              downloadProgress: controller.downloadProgress,
-            ),
+            _buildTextLocalizationTile(controller),
             const SizedBox(height: 10),
             _buildComponentTile(
               icon: Icons.image_rounded,
@@ -1124,7 +1110,9 @@ class _MainScreenState extends State<MainScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Полная русификация (текст, интерфейс и графика)',
+                    controller.isPremium
+                        ? 'Полная русификация (текст, интерфейс и графика)'
+                        : 'Бесплатная версия: перевод сюжета',
                     style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.85),
                       fontSize: 12,
@@ -1361,6 +1349,63 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
+  /// Заголовок диалога: иконка + текст с переносом, без обрезки на узком экране.
+  Widget _infoDialogTitle(IconData icon, String title) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, color: const Color(0xFFC9A227)),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            title,
+            style: TextStyle(
+              color: Theme.of(context).textTheme.bodyMedium?.color,
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              height: 1.25,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Кнопка на всю ширину диалога — длинные подписи не вылезают за край.
+  Widget _fullWidthDialogButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onPressed,
+    bool filled = false,
+  }) {
+    final child = Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(icon, size: 16),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+
+    if (filled) {
+      return ElevatedButton(
+        onPressed: onPressed,
+        child: child,
+      );
+    }
+    return OutlinedButton(
+      onPressed: onPressed,
+      child: child,
+    );
+  }
+
   /// Shown when a locked "Графика и текстуры" card is tapped: explains that
   /// texture packs require Telegram channel membership and offers a way to
   /// join the channel or retry the login (e.g. after the JWT expired).
@@ -1370,56 +1415,61 @@ class _MainScreenState extends State<MainScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: Theme.of(context).cardColor,
-        title: Row(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+        title: _infoDialogTitle(
+          Icons.lock_rounded,
+          'Доступ ограничен',
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Icon(Icons.lock_rounded, color: Color(0xFFC9A227)),
-            const SizedBox(width: 8),
             Text(
-              'Доступ ограничен',
+              'Графическая локализация доступна только участникам нашего приватного премиум-канала. '
+              'Присоединитесь к каналу, а затем повторно войдите через Telegram, чтобы разблокировать установку текстур.',
               style: TextStyle(
-                color: Theme.of(context).textTheme.bodyMedium?.color,
+                color: Theme.of(context).textTheme.bodySmall?.color,
+                height: 1.45,
               ),
+            ),
+            const SizedBox(height: 18),
+            _fullWidthDialogButton(
+              icon: Icons.diamond_rounded,
+              label: 'Премиум-канал',
+              filled: true,
+              onPressed: () async {
+                Navigator.of(ctx).pop();
+                final opened = await launchUrl(
+                  Uri.parse(premiumChannelUrl),
+                  mode: LaunchMode.externalApplication,
+                );
+                if (!opened && mounted && messenger != null) {
+                  messenger.showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Не удалось открыть ссылку: $premiumChannelUrl',
+                      ),
+                    ),
+                  );
+                }
+              },
+            ),
+            const SizedBox(height: 8),
+            _fullWidthDialogButton(
+              icon: Icons.refresh_rounded,
+              label: 'Проверить доступ',
+              onPressed: () async {
+                Navigator.of(ctx).pop();
+                await _retryTelegramLogin(controller);
+              },
+            ),
+            const SizedBox(height: 4),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Отмена'),
             ),
           ],
         ),
-        content: Text(
-          'Графическая локализация доступна только участникам нашего приватного премиум-канала. '
-          'Присоединитесь к каналу, а затем повторно войдите через Telegram, чтобы разблокировать установку текстур.',
-          style: TextStyle(
-            color: Theme.of(context).textTheme.bodySmall?.color,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Отмена'),
-          ),
-          OutlinedButton.icon(
-            onPressed: () async {
-              final opened = await launchUrl(
-                Uri.parse(premiumChannelUrl),
-                mode: LaunchMode.externalApplication,
-              );
-              if (!opened && mounted && messenger != null) {
-                messenger.showSnackBar(
-                  const SnackBar(
-                    content: Text('Не удалось открыть ссылку: $premiumChannelUrl'),
-                  ),
-                );
-              }
-            },
-            icon: const Icon(Icons.diamond_rounded, size: 16),
-            label: const Text('Присоединиться к премиум-каналу'),
-          ),
-          ElevatedButton.icon(
-            onPressed: () async {
-              Navigator.of(ctx).pop();
-              await _retryTelegramLogin(controller);
-            },
-            icon: const Icon(Icons.refresh_rounded, size: 16),
-            label: const Text('Проверить доступ повторно'),
-          ),
-        ],
       ),
     );
   }
@@ -1458,11 +1508,99 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
+  /// Карточка текста: у бесплатных — только сюжет и пометка о неполной версии.
+  Widget _buildTextLocalizationTile(LauncherController controller) {
+    final isFree = !controller.isPremium;
+    return _buildComponentTile(
+      icon: Icons.translate_rounded,
+      title: 'Текстовая локализация',
+      subtitle: isFree
+          ? 'Перевод сюжета'
+          : 'Перевод сюжета и внутриигровых меню',
+      trailing: _buildVersionBadge(controller),
+      showDownloadProgress: controller.isDownloadingText,
+      downloadProgress: controller.downloadProgress,
+      footer: isFree ? _buildPartialTextHint() : null,
+      onTap: isFree ? () => _showPartialTextDialog(controller) : null,
+    );
+  }
+
+  /// Компактная золотая пометка: бесплатный пакет не покрывает меню и UI.
+  Widget _buildPartialTextHint() {
+    const color = Color(0xFFC9A227);
+    return Row(
+      children: [
+        const Icon(Icons.info_outline_rounded, size: 14, color: color),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            'Неполная версия. Меню и интерфейс игры — в Premium',
+            style: TextStyle(
+              color: color.withValues(alpha: 0.95),
+              fontSize: 11.5,
+              height: 1.35,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _showPartialTextDialog(LauncherController controller) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(context).cardColor,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+        title: _infoDialogTitle(
+          Icons.translate_rounded,
+          'Неполная локализация',
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'В бесплатной версии переведён только сюжет. '
+              'Тексты меню, интерфейса и системных окон остаются на английском. '
+              'Полная русификация текстовой части доступна с Premium — '
+              'после вступления в премиум-канал и повторного входа через Telegram.',
+              style: TextStyle(
+                color: Theme.of(context).textTheme.bodySmall?.color,
+                height: 1.45,
+              ),
+            ),
+            const SizedBox(height: 18),
+            _fullWidthDialogButton(
+              icon: Icons.workspace_premium_rounded,
+              label: 'Premium',
+              filled: true,
+              onPressed: () async {
+                Navigator.of(ctx).pop();
+                await launchUrl(
+                  Uri.parse(premiumChannelUrl),
+                  mode: LaunchMode.externalApplication,
+                );
+              },
+            ),
+            const SizedBox(height: 4),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Понятно'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildComponentTile({
     required IconData icon,
     required String title,
     required String subtitle,
     Widget? trailing,
+    Widget? footer,
     bool dimmed = false,
     bool premiumLocked = false,
     bool showDownloadProgress = false,
@@ -1517,6 +1655,10 @@ class _MainScreenState extends State<MainScreen> {
                 if (trailing != null) trailing,
               ],
             ),
+            if (footer != null) ...[
+              const SizedBox(height: 10),
+              footer,
+            ],
             if (showDownloadProgress) ...[
               const SizedBox(height: 12),
               EpochProgressBar(
