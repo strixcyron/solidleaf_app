@@ -519,16 +519,22 @@ class _MainScreenState extends State<MainScreen> {
             Row(
               children: [
                 Icon(
-                  Icons.folder_outlined,
+                  controller.isInstallPathValid
+                      ? Icons.folder_outlined
+                      : Icons.folder_off_outlined,
                   size: 18,
-                  color: Theme.of(context).textTheme.bodySmall?.color,
+                  color: controller.isInstallPathValid
+                      ? Theme.of(context).textTheme.bodySmall?.color
+                      : Theme.of(context).colorScheme.error,
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     controller.installPath,
                     style: TextStyle(
-                      color: Theme.of(context).textTheme.bodySmall?.color,
+                      color: controller.isInstallPathValid
+                          ? Theme.of(context).textTheme.bodySmall?.color
+                          : Theme.of(context).colorScheme.error,
                       fontFamily: 'Consolas',
                       fontSize: 12,
                     ),
@@ -536,12 +542,20 @@ class _MainScreenState extends State<MainScreen> {
                   ),
                 ),
                 IconButton(
+                  onPressed: controller.detectInstallPath,
+                  icon: Icon(
+                    Icons.search_rounded,
+                    color: Theme.of(context).textTheme.bodySmall?.color,
+                  ),
+                  tooltip: 'Найти игру автоматически',
+                ),
+                IconButton(
                   onPressed: controller.selectInstallPath,
                   icon: Icon(
                     Icons.folder_open_rounded,
                     color: Theme.of(context).textTheme.bodySmall?.color,
                   ),
-                  tooltip: 'Выбрать папку',
+                  tooltip: 'Выбрать папку вручную',
                 ),
               ],
             ),
@@ -561,13 +575,6 @@ class _MainScreenState extends State<MainScreen> {
               color: Theme.of(context).textTheme.bodyMedium?.color,
             ),
           ),
-          if (controller.isDownloading) ...[
-            const SizedBox(height: 10),
-            EpochProgressBar(
-              progress: controller.downloadProgress,
-              indeterminate: controller.downloadProgress == 0,
-            ),
-          ],
         ],
       ),
     );
@@ -912,7 +919,7 @@ class _MainScreenState extends State<MainScreen> {
                         title: 'Текстовая локализация',
                         subtitle: 'Перевод сюжета и внутриигровых меню',
                         trailing: _buildVersionBadge(controller),
-                        showDownloadProgress: controller.isDownloading,
+                        showDownloadProgress: controller.isDownloadingText,
                         downloadProgress: controller.downloadProgress,
                       ),
                       const SizedBox(height: 10),
@@ -925,6 +932,8 @@ class _MainScreenState extends State<MainScreen> {
                             : _buildPremiumLockBadge(),
                         dimmed: !controller.isPremium,
                         premiumLocked: !controller.isPremium,
+                        showDownloadProgress: controller.isDownloadingArt,
+                        downloadProgress: controller.downloadProgress,
                         onTap: controller.isPremium
                             ? null
                             : () => _showPremiumLockDialog(controller),
@@ -1023,7 +1032,7 @@ class _MainScreenState extends State<MainScreen> {
               title: 'Текстовая локализация',
               subtitle: 'Перевод сюжета и внутриигровых меню',
               trailing: _buildVersionBadge(controller),
-              showDownloadProgress: controller.isDownloading,
+              showDownloadProgress: controller.isDownloadingText,
               downloadProgress: controller.downloadProgress,
             ),
             const SizedBox(height: 10),
@@ -1036,6 +1045,8 @@ class _MainScreenState extends State<MainScreen> {
                   : _buildPremiumLockBadge(),
               dimmed: !controller.isPremium,
               premiumLocked: !controller.isPremium,
+              showDownloadProgress: controller.isDownloadingArt,
+              downloadProgress: controller.downloadProgress,
               onTap: controller.isPremium
                   ? null
                   : () => _showPremiumLockDialog(controller),
@@ -1286,7 +1297,7 @@ class _MainScreenState extends State<MainScreen> {
       );
     }
     return AnimatedStatusBadge(
-      label: controller.currentVersion,
+      label: controller.displayCurrentVersion,
       color: const Color(0xFF2E7D32),
       icon: Icons.check_circle_rounded,
       kind: StatusBadgeKind.installed,

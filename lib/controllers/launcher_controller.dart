@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_constants.dart';
 import '../config/github_config.dart';
 import '../services/cover_accent_loader.dart';
+import '../services/game_path_finder.dart';
 import '../telegram_auth_service.dart';
 
 class LauncherController extends ChangeNotifier {
@@ -29,11 +30,14 @@ class LauncherController extends ChangeNotifier {
 
   bool isDarkMode = true;
   bool isDownloading = false;
+  /// Какой компонент сейчас качается: `text`, `art` или `null`.
+  String? downloadingKind;
   bool hasUpdate = false;
   bool hasArtUpdate = false;
   bool isShizukuActive = false;
   double downloadProgress = 0;
   String installPath = '';
+  bool isInstallPathValid = false;
   String currentVersion = 'v0.0.0';
   String currentArtVersion = 'v0.0.0';
   String remoteVersion = '—';
@@ -48,6 +52,20 @@ class LauncherController extends ChangeNotifier {
   static const _releaseCacheTtl = Duration(seconds: 45);
 
   bool? _cachedReleaseIsPremium;
+
+  bool get isDownloadingText => isDownloading && downloadingKind == 'text';
+  bool get isDownloadingArt => isDownloading && downloadingKind == 'art';
+
+  /// Версия текста для отображения (старые установки могли сохранить тег `update`).
+  String get displayCurrentVersion {
+    if (_looksLikeSemanticVersion(currentVersion)) {
+      return currentVersion;
+    }
+    if (currentVersion != 'v0.0.0' && _looksLikeSemanticVersion(remoteVersion)) {
+      return remoteVersion;
+    }
+    return currentVersion;
+  }
 
   // --- Telegram account tiers (login-gated launcher access) ----------------
   // The auth backend now issues a JWT to ANY member of the public community
@@ -155,7 +173,15 @@ class LauncherController extends ChangeNotifier {
     isDarkMode = prefs.getBool('is_dark_mode') ?? true;
     currentVersion = prefs.getString('installed_version') ?? 'v0.0.0';
     currentArtVersion = prefs.getString('installed_art_version') ?? 'v0.0.0';
-    installPath = _defaultInstallPath();
+    installPath = await _resolveInstallPath(prefs);
+    isInstallPathValid = GamePathFinder.isValidGamePath(installPath);
+    if (isInstallPathValid) {
+      addLog('Папка игры: $installPath');
+    } else if (Platform.isWindows) {
+      addLog(
+        'Игра не найдена автоматически — укажите папку с $_gameDataFolderHint',
+      );
+    }
     await GitHubConfig.warmUp();
     debugPrint('[GitHubConfig] ${GitHubConfig.debugState}');
     addLog('GitHub token — ${GitHubConfig.debugState}');
@@ -180,14 +206,37 @@ class LauncherController extends ChangeNotifier {
     notifyListeners();
   }
 
-  String _defaultInstallPath() {
+  static const _gameDataFolderHint = 'reverse1999_Data';
+
+  /// Сначала сохранённый путь, затем автопоиск на Windows, иначе подсказка.
+  Future<String> _resolveInstallPath(SharedPreferences prefs) async {
+    final saved = prefs.getString(GamePathFinder.prefsKey);
+    if (saved != null && GamePathFinder.isValidGamePath(saved)) {
+      return saved;
+    }
+
     if (Platform.isAndroid) {
       return '/storage/emulated/0/Android/data/com.bluepoch.m.en.reverse1999/';
     }
+
     if (Platform.isWindows) {
-      return r'Укажите путь к игре, например: C:\Games\Reverse1999\Reverse1999_EN';
+      final found = await GamePathFinder.findWindowsGamePath();
+      if (found != null) {
+        await prefs.setString(GamePathFinder.prefsKey, found);
+        return found;
+      }
+      return _windowsInstallPathPlaceholder();
     }
+
     return '/tmp/reverse1999_localization';
+  }
+
+  String _windowsInstallPathPlaceholder() {
+    return 'Укажите путь к игре, например: D:\\Games\\reverse1999_global';
+  }
+
+  void _refreshInstallPathState() {
+    isInstallPathValid = GamePathFinder.isValidGamePath(installPath);
   }
 
   void addLog(String message) {
@@ -874,14 +923,31 @@ class LauncherController extends ChangeNotifier {
     );
   }
 
-  String _artVersionFromAsset(
+  String _versionFromAsset(
     Map<String, dynamic> asset,
     Map<String, dynamic> release,
   ) {
     final name = (asset['name'] ?? '').toString();
-    final verMatch = RegExp(r'(\d+(?:\.\d+)*)').firstMatch(name);
-    if (verMatch != null) return 'v${verMatch.group(1)}';
+    final verMatch = RegExp(r'(\d+(?:\.\d+)+)').firstMatch(name);
+    if (verMatch != null) {
+      return 'v${verMatch.group(1)}';
+    }
+    return _releaseVersionLabel(release);
+  }
+
+  /// Версия из полей релиза, если тег — служебный (например `update`).
+  String _releaseVersionLabel(Map<String, dynamic> release) {
+    for (final field in [release['name'], release['tag_name']]) {
+      final value = (field ?? '').toString();
+      if (_looksLikeSemanticVersion(value)) {
+        return value.startsWith('v') ? value : 'v$value';
+      }
+    }
     return (release['tag_name'] ?? release['name'] ?? 'v0.0.0').toString();
+  }
+
+  bool _looksLikeSemanticVersion(String value) {
+    return RegExp(r'^v?\d+(?:\.\d+)+').hasMatch(value);
   }
 
   Future<void> checkForUpdates() async {
@@ -889,12 +955,14 @@ class LauncherController extends ChangeNotifier {
       statusText = 'Проверка обновлений...';
       addLog('Запрос GitHub Releases ($_activeReleaseRepoLabel)...');
       final data = await _fetchLatestRelease(force: true);
-      final version = (data['tag_name'] ?? data['name'] ?? 'v0.0.0').toString();
+      final version = _releaseVersionLabel(data);
       final body = (data['body'] ?? 'Без списка изменений').toString();
       final assets = _releaseAssets(data);
       final zipAsset = _pickTextAsset(assets);
 
-      remoteVersion = version;
+      remoteVersion = zipAsset != null
+          ? _versionFromAsset(zipAsset, data)
+          : version;
       changelog = body;
 
       if (zipAsset == null) {
@@ -950,10 +1018,9 @@ class LauncherController extends ChangeNotifier {
       final artAsset = _pickArtAsset(assets);
 
       if (artAsset != null) {
-        remoteArtVersion = _artVersionFromAsset(artAsset, data);
+        remoteArtVersion = _versionFromAsset(artAsset, data);
       } else {
-        remoteArtVersion =
-            (data['tag_name'] ?? data['name'] ?? remoteVersion).toString();
+        remoteArtVersion = _releaseVersionLabel(data);
         addLog(
           'Art-архив не найден в релизе, версия взята из тега: $remoteArtVersion',
         );
@@ -972,16 +1039,58 @@ class LauncherController extends ChangeNotifier {
 
   Future<void> selectInstallPath() async {
     final selected = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: 'Выберите папку установки',
+      dialogTitle: 'Выберите папку с игрой (где лежит $_gameDataFolderHint)',
     );
     if (selected != null && selected.isNotEmpty) {
       installPath = selected;
-      addLog('Выбрана папка: $installPath');
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(GamePathFinder.prefsKey, selected);
+      _refreshInstallPathState();
+      if (isInstallPathValid) {
+        addLog('Папка игры: $installPath');
+      } else {
+        addLog(
+          'Папка выбрана, но $_gameDataFolderHint не найдена — проверьте путь',
+        );
+      }
       notifyListeners();
     }
   }
 
+  /// Повторный автопоиск (если игра установилась после запуска лаунчера).
+  Future<void> detectInstallPath() async {
+    if (!Platform.isWindows) {
+      return;
+    }
+
+    final found = await GamePathFinder.findWindowsGamePath();
+    if (found == null) {
+      addLog('Автопоиск: игра не найдена на дисках');
+      notifyListeners();
+      return;
+    }
+
+    installPath = found;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(GamePathFinder.prefsKey, found);
+    _refreshInstallPathState();
+    addLog('Автопоиск: найдена игра — $installPath');
+    notifyListeners();
+  }
+
   Future<void> installOrUpdate() async {
+    if (!isInstallPathValid) {
+      if (Platform.isWindows) {
+        await detectInstallPath();
+      }
+      if (!isInstallPathValid) {
+        statusText = 'Укажите папку с установленной игрой';
+        addLog(statusText);
+        notifyListeners();
+        return;
+      }
+    }
+
     if (remoteVersion == '—') {
       await checkForUpdates();
     }
@@ -1005,6 +1114,18 @@ class LauncherController extends ChangeNotifier {
       return;
     }
 
+    if (!isInstallPathValid) {
+      if (Platform.isWindows) {
+        await detectInstallPath();
+      }
+      if (!isInstallPathValid) {
+        statusText = 'Укажите папку с установленной игрой';
+        addLog(statusText);
+        notifyListeners();
+        return;
+      }
+    }
+
     final asset = await _getArtAsset();
     await _downloadAndInstallReleaseAsset(asset, kind: 'art');
   }
@@ -1024,6 +1145,7 @@ class LauncherController extends ChangeNotifier {
 
     try {
       isDownloading = true;
+      downloadingKind = kind;
       downloadProgress = 0;
       notifyListeners();
 
@@ -1066,14 +1188,20 @@ class LauncherController extends ChangeNotifier {
       addLog('Архив загружен: $zipPath');
       await _extractArchive(zipPath, installPath, archiveKind: kind);
 
+      final installedVersion = _versionFromAsset(asset, {
+        'tag_name': kind == 'art' ? remoteArtVersion : remoteVersion,
+        'name': kind == 'art' ? remoteArtVersion : remoteVersion,
+      });
       final prefs = await SharedPreferences.getInstance();
       if (kind == 'art') {
-        await prefs.setString('installed_art_version', remoteArtVersion);
-        currentArtVersion = remoteArtVersion;
+        await prefs.setString('installed_art_version', installedVersion);
+        currentArtVersion = installedVersion;
+        remoteArtVersion = installedVersion;
         hasArtUpdate = false;
       } else {
-        await prefs.setString('installed_version', remoteVersion);
-        currentVersion = remoteVersion;
+        await prefs.setString('installed_version', installedVersion);
+        currentVersion = installedVersion;
+        remoteVersion = installedVersion;
         hasUpdate = false;
       }
 
@@ -1084,6 +1212,7 @@ class LauncherController extends ChangeNotifier {
       notifyListeners();
       await Future<void>.delayed(const Duration(milliseconds: 280));
       isDownloading = false;
+      downloadingKind = null;
       downloadProgress = 0;
       addLog(
         kind == 'art'
@@ -1093,9 +1222,11 @@ class LauncherController extends ChangeNotifier {
       notifyListeners();
     } on DioException catch (error) {
       isDownloading = false;
+      downloadingKind = null;
       _handleDioError(error);
     } catch (error) {
       isDownloading = false;
+      downloadingKind = null;
       final message = 'Ошибка установки: ${error.toString()}';
       statusText = message;
       addLog(message);
