@@ -18,6 +18,7 @@ import '../widgets/effects/magnetic_hover.dart';
 import '../widgets/effects/rain_glass_overlay.dart';
 import '../widgets/effects/staggered_fade_in.dart';
 import '../widgets/mini_player.dart';
+import 'about_project_page.dart';
 import 'gift_codes_page.dart';
 import 'login_screen.dart' hide telegramUrl;
 
@@ -243,33 +244,26 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  Future<void> _showProjectInfoDialog() async {
+  Future<void> _openAboutProjectPage() async {
     if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Theme.of(context).cardColor,
-        title: Text(
-          'SolidLeaf | Reverse: 1999 Localization',
-          style: TextStyle(
-            color: Theme.of(context).textTheme.bodyMedium?.color,
-          ),
-        ),
-        content: Text(
-          'Фанатский проект локализации.\n\n'
-          'Цель — сделать комфортный и удобный лаунчер для установки и обновления русификатора, '
-          'сохраняя удобство для игроков и простоту для поддержки проекта.',
-          style: TextStyle(
-            color: Theme.of(context).textTheme.bodySmall?.color,
-            height: 1.5,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Закрыть'),
-          ),
-        ],
+    await Navigator.of(context).push(
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            const AboutProjectPage(),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          const begin = Offset(1.0, 0.0);
+          const end = Offset.zero;
+          final tween = Tween(
+            begin: begin,
+            end: end,
+          ).chain(CurveTween(curve: Curves.easeOutCubic));
+          return SlideTransition(
+            position: animation.drive(tween),
+            child: child,
+          );
+        },
+        transitionDuration: const Duration(milliseconds: 260),
+        reverseTransitionDuration: const Duration(milliseconds: 220),
       ),
     );
   }
@@ -790,7 +784,7 @@ class _MainScreenState extends State<MainScreen> {
               _navButton(
                 Icons.info_outline_rounded,
                 true,
-                onTap: _showProjectInfoDialog,
+                onTap: _openAboutProjectPage,
                 tooltip: 'О проекте',
               ),
               _navButton(
