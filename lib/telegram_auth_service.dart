@@ -318,29 +318,30 @@ class TelegramAuthService {
     final kind = assetKind.toLowerCase();
 
     try {
-      final response = await _dio.get<List<int>>(
+      // Пишем сразу в файл: zip на телефоне не должен целиком лежать в RAM.
+      final tempDir = await getTemporaryDirectory();
+      final filePath =
+          '${tempDir.path}/premium_${kind}_${DateTime.now().millisecondsSinceEpoch}.zip';
+      await _dio.download(
         '${TelegramAuthConfig.baseUrl}/api/download/premium',
+        filePath,
         queryParameters: {'platform': platform, 'asset_kind': kind},
         onReceiveProgress: onProgress,
         options: Options(
           headers: {'Authorization': 'Bearer $token'},
-          responseType: ResponseType.bytes,
-          receiveTimeout: const Duration(minutes: 10),
+          receiveTimeout: const Duration(minutes: 20),
+          sendTimeout: const Duration(seconds: 30),
+          followRedirects: true,
+          maxRedirects: 5,
         ),
       );
 
-      final bytes = response.data;
-      if (bytes == null) {
+      final file = File(filePath);
+      if (!await file.exists() || await file.length() == 0) {
         throw TelegramAuthException(
           'Пустой ответ сервера при скачивании ($kind).',
         );
       }
-
-      final tempDir = await getTemporaryDirectory();
-      final filePath =
-          '${tempDir.path}/premium_${kind}_${DateTime.now().millisecondsSinceEpoch}.zip';
-      final file = File(filePath);
-      await file.writeAsBytes(bytes, flush: true);
       return file;
     } on DioException catch (e) {
       if (e.response?.statusCode == 401) {
