@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+
 import '../models/team_member.dart';
 
 /// Состав команды SOLIDLEAF — редактируйте этот файл при изменении состава.
@@ -9,45 +11,94 @@ class ProjectTeam {
       title: 'Разработчики',
       members: [
         TeamMember(
-          name: 'STRIX CYRON',
+          name: 'Strix',
           description:
-              'Разработчик лаунчера для Windows и Android, Telegram-авторизация, '
-              'инфраструктура обновлений и премиум-доступа.',
-          profileUrl: 'https://github.com/strixcyron',
-          avatarAsset: 'assets/images/launcher_icon.png',
+              'Разработчик лаунчера для Windows и Android а также русификатора для игры',
+          profileUrl: 'https://t.me/strix_gfx',
+          avatarAsset: 'assets/images/strix_avatar.png',
+          isLead: true,
         ),
         TeamMember(
-          name: 'FrauxHD',
+          name: 'Super Clever',
           description:
-              'Backend-авторизация, Telegram-бот, приватные релизы премиум-контента '
-              'и поддержка GitHub-инфраструктуры.',
-          profileUrl: 'https://github.com/FrauxHD',
+              'Разработчик русификатора, фронтенд-бэкенд разработчик'
+              'и создатель баззы данных для русификатора',
+          profileUrl: 'https://t.me/SuperKlever',
+          avatarAsset: 'assets/images/super_clever_avatar.png',
+          isLead: true,
         ),
       ],
     ),
     TeamSection(
       title: 'Редакторы',
+      roleIcon: Icons.edit_document,
       members: [
         TeamMember(
-          name: 'SOLIDLEAF TEAM',
+          name: 'Koven',
           description:
-              'Редактура и адаптация текстовой локализации: сюжет, диалоги, '
-              'интерфейс и внутриигровые тексты.',
-          profileUrl: 'https://t.me/reverse1999_solidleaf',
-          avatarAsset: 'assets/images/telegram_icon.png',
+              'Главный редактор текстовой локализации: сюжета, диалогав,'
+              'интерфейса и внутриигровых текстов.',
+          profileUrl: 'https://t.me/Kovven',
+          avatarAsset: 'assets/images/coven.png',
+          isLead: true,
+        ),
+        TeamMember(
+          name: '❀ Mr. Florister ❀',
+          description:
+              'Редактор текстовой локализации игры'
+              ' атак же глава Фонада Святого Павлова',
+          profileUrl: 'https://t.me/Mr_florister',
+          channelUrl: 'https://t.me/stpf_info',
+          avatarAsset: 'assets/images/florister.png',
+        ),
+         TeamMember(
+          name: 'сін рэп шушы GSG9',
+          description:
+              'Редактор текстовой локализации игры',
+          profileUrl: 'https://t.me/dicekin',
+          avatarAsset: 'assets/images/sin.png',
+        ),
+         TeamMember(
+          name: '꒰ эдем꒱୧ ‧₊˚',
+          description:
+              'Редактор текстовой локализации игры',
+          profileUrl: 'https://t.me/tenshitenshi8hn',
+          avatarAsset: 'assets/images/edem.png',
         ),
       ],
     ),
     TeamSection(
       title: 'Дизайнеры',
+      roleIcon: Icons.palette_rounded,
       members: [
         TeamMember(
-          name: 'SOLIDLEAF TEAM',
+          name: 'Strix',
           description:
               'Визуальное оформление лаунчера, иконки, обложки и графика '
-              'премиум-локализации.',
-          profileUrl: 'https://boosty.to/strix.cyron',
-          avatarAsset: 'assets/images/boosty_icon.png',
+              'локализация текстур игры.',
+          profileUrl: 'https://t.me/strix_gfx',
+          avatarAsset: 'assets/images/strix_avatar.png',
+        ),
+        TeamMember(
+          name: 'Ares Sideris',
+          description:
+              'Локализация текстур игры.',
+          profileUrl: 'https://t.me/Ares_Sideris',
+          avatarAsset: 'assets/images/ares_sideris.png',
+        ),
+      ],
+    ),
+    TeamSection(
+      title: 'Медия',
+      roleIcon: Icons.music_note,
+      members: [
+        TeamMember(
+          name: 'Бусинка',
+          description:
+              'Медия по игре',
+          profileUrl: 'https://t.me/F_ftornik',
+          channelUrl: '',
+          avatarAsset: 'assets/images/no_avatar.png',
         ),
       ],
     ),

@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   audioplayers_windows
+  dynamic_color
   flutter_secure_storage_windows
   screen_retriever_windows
   url_launcher_windows

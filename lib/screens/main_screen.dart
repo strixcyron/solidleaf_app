@@ -9,7 +9,9 @@ import 'package:window_manager/window_manager.dart';
 
 import '../config/app_constants.dart';
 import '../controllers/launcher_controller.dart';
+import '../data/animated_covers.dart';
 import '../telegram_auth_service.dart';
+import '../widgets/animated_cover_view.dart';
 import '../widgets/effects/animated_status_badge.dart';
 import '../widgets/effects/arcane_hover_border.dart';
 import '../widgets/effects/confetti_burst.dart';
@@ -17,8 +19,10 @@ import '../widgets/effects/epoch_progress_bar.dart';
 import '../widgets/effects/magnetic_hover.dart';
 import '../widgets/effects/rain_glass_overlay.dart';
 import '../widgets/effects/staggered_fade_in.dart';
+import '../widgets/launcher_version_badge.dart';
 import '../widgets/mini_player.dart';
 import 'about_project_page.dart';
+import 'settings_page.dart';
 import 'gift_codes_page.dart';
 import 'login_screen.dart' hide telegramUrl;
 
@@ -472,6 +476,30 @@ class _MainScreenState extends State<MainScreen> {
       PageRouteBuilder(
         pageBuilder: (context, animation, secondaryAnimation) =>
             const AboutProjectPage(),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          const begin = Offset(1.0, 0.0);
+          const end = Offset.zero;
+          final tween = Tween(
+            begin: begin,
+            end: end,
+          ).chain(CurveTween(curve: Curves.easeOutCubic));
+          return SlideTransition(
+            position: animation.drive(tween),
+            child: child,
+          );
+        },
+        transitionDuration: const Duration(milliseconds: 260),
+        reverseTransitionDuration: const Duration(milliseconds: 220),
+      ),
+    );
+  }
+
+  Future<void> _openSettingsPage() async {
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            const SettingsPage(),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           const begin = Offset(1.0, 0.0);
           const end = Offset.zero;
@@ -1016,6 +1044,12 @@ class _MainScreenState extends State<MainScreen> {
                 tooltip: 'Подарочные коды',
               ),
               _navButton(
+                Icons.settings_rounded,
+                false,
+                onTap: _openSettingsPage,
+                tooltip: 'Настройки',
+              ),
+              _navButton(
                 isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
                 false,
                 onTap: controller.toggleTheme,
@@ -1046,6 +1080,8 @@ class _MainScreenState extends State<MainScreen> {
                       size: 52,
                       onTap: () => _openExternalLink(telegramUrl),
                     ),
+                    const SizedBox(height: 16),
+                    const LauncherVersionBadge(compact: true),
                   ],
                 ),
               ),
@@ -1182,13 +1218,20 @@ class _MainScreenState extends State<MainScreen> {
             Row(
               children: [
                 Expanded(
-                  child: Text(
-                    'SOLIDLEAF TEAM',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context).textTheme.bodyMedium?.color,
-                    ),
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          'SOLIDLEAF TEAM',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Theme.of(context).textTheme.bodyMedium?.color,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 IconButton(
@@ -1287,14 +1330,94 @@ class _MainScreenState extends State<MainScreen> {
                   ? null
                   : () => _showPremiumLockDialog(controller),
             ),
-            const SizedBox(height: 16),
-            TextButton.icon(
-              onPressed: () => _showRemoveBackupDialog(controller),
-              icon: const Icon(Icons.delete_outline_rounded, size: 18),
-              label: const Text('Удалить русификатор'),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Text(
+                  'Музыка',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).textTheme.bodyMedium?.color,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                  Icons.music_note_rounded,
+                  size: 16,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            const MiniPlayer(useCardColor: true, collapsible: true),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                TextButton.icon(
+                  onPressed: () => _showRemoveBackupDialog(controller),
+                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                  label: const Text('Удалить русификатор'),
+                ),
+                const SizedBox(width: 10),
+                const LauncherVersionBadge(),
+              ],
             ),
             const SizedBox(height: 10),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Обложка: анимированная (выбранный вариант из assets/video/) при
+  /// включённой настройке, иначе — статичная. На Android приоритет у mp4
+  /// через video_player, затем откат на webp → gif → статичную jpg.
+  Widget _buildCoverImage(LauncherController controller) {
+    if (controller.animatedCoverEnabled) {
+      final cover = animatedCovers[
+          controller.animatedCoverIndex.clamp(0, animatedCovers.length - 1)];
+      return AnimatedCoverView(
+        cover: cover,
+        imageFallback: _animatedImageFallback(controller, cover),
+      );
+    }
+    return _staticCover(controller);
+  }
+
+  /// Анимированная обложка без видео: webp → gif → статичная jpg.
+  Widget _animatedImageFallback(
+    LauncherController controller,
+    AnimatedCover cover,
+  ) {
+    return Image.asset(
+      cover.webp,
+      fit: BoxFit.cover,
+      gaplessPlayback: true,
+      errorBuilder: (_, __, ___) => Image.asset(
+        cover.gif,
+        fit: BoxFit.cover,
+        gaplessPlayback: true,
+        errorBuilder: (_, __, ___) => _staticCover(controller),
+      ),
+    );
+  }
+
+  /// Статичная обложка с градиентным фолбэком, если картинки нет.
+  Widget _staticCover(LauncherController controller) {
+    return Image.asset(
+      'assets/images/cover.jpg',
+      fit: BoxFit.cover,
+      errorBuilder: (context, error, stackTrace) => DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: controller.isDarkMode
+                ? [const Color(0xFF3A2B6E), const Color(0xFF1B1430)]
+                : [const Color(0xFF8C6D3B), const Color(0xFF4A351A)],
+          ),
         ),
       ),
     );
@@ -1313,22 +1436,9 @@ class _MainScreenState extends State<MainScreen> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            Image.asset(
-              'assets/images/cover.jpg',
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) => DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: controller.isDarkMode
-                        ? [const Color(0xFF3A2B6E), const Color(0xFF1B1430)]
-                        : [const Color(0xFF8C6D3B), const Color(0xFF4A351A)],
-                  ),
-                ),
-              ),
-            ),
-            const Positioned.fill(child: RainGlassOverlay()),
+            _buildCoverImage(controller),
+            if (controller.animationsEnabled)
+              const Positioned.fill(child: RainGlassOverlay()),
             DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
@@ -1381,6 +1491,12 @@ class _MainScreenState extends State<MainScreen> {
             if (showSocialInCorners)
               Positioned(
                 top: 10,
+                left: 10,
+                child: _buildAboutCoverButton(),
+              ),
+            if (showSocialInCorners)
+              Positioned(
+                top: 10,
                 right: 10,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -1403,10 +1519,45 @@ class _MainScreenState extends State<MainScreen> {
                       size: 32,
                       onTap: () => _openExternalLink(telegramUrl),
                     ),
+                    const SizedBox(height: 8),
+                    _buildCoverIconButton(
+                      icon: Icons.settings_rounded,
+                      tooltip: 'Настройки',
+                      size: 32,
+                      onTap: _openSettingsPage,
+                    ),
                   ],
                 ),
               ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Круглая кнопка в углу баннера (иконка на полупрозрачном фоне).
+  Widget _buildCoverIconButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onTap,
+    double size = 32,
+  }) {
+    final radius = size / 4;
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(radius),
+        child: Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.45),
+            borderRadius: BorderRadius.circular(radius),
+            border: Border.all(color: Colors.white24),
+          ),
+          alignment: Alignment.center,
+          child: Icon(icon, color: Colors.white, size: size * 0.55),
         ),
       ),
     );
@@ -1462,6 +1613,48 @@ class _MainScreenState extends State<MainScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Стеклянная кнопка «О проекте» в левом верхнем углу обложки (Android).
+  /// Симметрична соц-иконкам справа и открывает страницу «О проекте».
+  Widget _buildAboutCoverButton() {
+    return Tooltip(
+      message: 'О проекте',
+      child: Material(
+        color: Colors.black.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(20),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: _openAboutProjectPage,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.white24),
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.info_outline_rounded,
+                  size: 16,
+                  color: Colors.white,
+                ),
+                SizedBox(width: 6),
+                Text(
+                  'О проекте',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

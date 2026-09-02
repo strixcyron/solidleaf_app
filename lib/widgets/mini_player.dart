@@ -9,7 +9,19 @@ import 'effects/parallax_cover.dart';
 import 'wave_slider_track_shape.dart';
 
 class MiniPlayer extends StatefulWidget {
-  const MiniPlayer({super.key});
+  /// Использовать `cardColor` вместо `scaffoldBackgroundColor` для фона —
+  /// чтобы плеер визуально совпадал с карточками компонентов (Android).
+  final bool useCardColor;
+
+  /// Сворачиваемая мини-панель: показывается только верхняя строка,
+  /// остальное разворачивается по тапу (экономит место на Android).
+  final bool collapsible;
+
+  const MiniPlayer({
+    super.key,
+    this.useCardColor = false,
+    this.collapsible = false,
+  });
 
   @override
   State<MiniPlayer> createState() => _MiniPlayerState();
@@ -20,6 +32,9 @@ class _MiniPlayerState extends State<MiniPlayer>
   final AudioPlayer player = AudioPlayer();
   bool isPlaying = false;
   late AnimationController _vinylController;
+
+  /// Развёрнут ли плеер. В несворачиваемом режиме (десктоп) — всегда true.
+  bool _expanded = true;
 
   Duration _duration = Duration.zero;
   Duration _position = Duration.zero;
@@ -100,6 +115,8 @@ class _MiniPlayerState extends State<MiniPlayer>
   @override
   void initState() {
     super.initState();
+    // Сворачиваемый плеер стартует свёрнутым, обычный — всегда развёрнут.
+    _expanded = !widget.collapsible;
     _vinylController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 4),
@@ -458,10 +475,15 @@ class _MiniPlayerState extends State<MiniPlayer>
   Widget build(BuildContext context) {
     final track = allTracks[currentIndex];
 
+    // Показывать ли разворачиваемое тело (визуализатор, прогресс, управление).
+    final showBody = !widget.collapsible || _expanded;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
       decoration: BoxDecoration(
-        color: Theme.of(context).scaffoldBackgroundColor,
+        color: widget.useCardColor
+            ? Theme.of(context).cardColor
+            : Theme.of(context).scaffoldBackgroundColor,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Theme.of(context).dividerColor, width: 1),
       ),
@@ -536,6 +558,19 @@ class _MiniPlayerState extends State<MiniPlayer>
                 ),
               ),
 
+              // Компактная play/pause — видна, когда плеер свёрнут.
+              if (widget.collapsible && !_expanded)
+                IconButton(
+                  icon: Icon(
+                    isPlaying
+                        ? Icons.pause_rounded
+                        : Icons.play_arrow_rounded,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  tooltip: isPlaying ? 'Пауза' : 'Воспроизвести',
+                  onPressed: togglePlay,
+                ),
+
               // Кнопка плейлиста/альбомов
               IconButton(
                 icon: Icon(
@@ -545,13 +580,35 @@ class _MiniPlayerState extends State<MiniPlayer>
                 tooltip: 'Альбомы',
                 onPressed: _showPlaylist,
               ),
+
+              // Переключатель сворачивания (только в сворачиваемом режиме).
+              if (widget.collapsible)
+                IconButton(
+                  icon: Icon(
+                    _expanded
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
+                    color: Theme.of(context).textTheme.bodySmall?.color,
+                  ),
+                  tooltip: _expanded ? 'Свернуть' : 'Развернуть',
+                  onPressed: () => setState(() => _expanded = !_expanded),
+                ),
             ],
           ),
 
-          Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: AudioVisualizer(isPlaying: isPlaying),
-          ),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOut,
+            alignment: Alignment.topCenter,
+            child: !showBody
+                ? const SizedBox(width: double.infinity)
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: AudioVisualizer(isPlaying: isPlaying),
+                      ),
 
 // Прогресс-бар длительности
           Padding(
@@ -655,6 +712,9 @@ class _MiniPlayerState extends State<MiniPlayer>
                 onPressed: nextTrack,
               ),
             ],
+          ),
+                    ],
+                  ),
           ),
         ],
       ),

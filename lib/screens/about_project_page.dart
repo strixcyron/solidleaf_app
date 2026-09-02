@@ -1,3 +1,4 @@
+import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -73,9 +74,13 @@ class AboutProjectPage extends StatelessWidget {
                 for (final member in section.members) ...[
                   _TeamMemberCard(
                     member: member,
+                    roleIcon: section.roleIcon,
                     onOpenLink: member.profileUrl == null
                         ? null
                         : () => _openLink(context, member.profileUrl!),
+                    onOpenChannel: member.channelUrl == null
+                        ? null
+                        : () => _openLink(context, member.channelUrl!),
                   ),
                   const SizedBox(height: 10),
                 ],
@@ -96,40 +101,61 @@ class _SupportButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Theme.of(context).cardColor,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 18),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Theme.of(context).dividerColor),
-          ),
-          child: Column(
-            children: [
-              Text(
-                'Поддержать проект',
-                style: TextStyle(
-                  color: Theme.of(context).textTheme.bodySmall?.color,
-                  fontSize: 13,
-                ),
+    // Продолговатая карточка по центру страницы, не на всю ширину.
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 400),
+        child: Material(
+          color: Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(20),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Theme.of(context).dividerColor),
               ),
-              const SizedBox(height: 10),
-              Image.asset(
-                'assets/images/boosty_icon.png',
-                width: 42,
-                height: 42,
-                errorBuilder: (_, __, ___) => Icon(
-                  Icons.favorite_rounded,
-                  size: 42,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Поддержать проект',
+                    style: TextStyle(
+                      color: Theme.of(context).textTheme.bodySmall?.color,
+                      fontSize: 18,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  // Картинка растянута на всю ширину карточки со скруглением.
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: Image.asset(
+                      'assets/images/abou_boosty.png',
+                      width: double.infinity,
+                      height: 60,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                        width: double.infinity,
+                        height: 85,
+                        alignment: Alignment.center,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .primary
+                            .withValues(alpha: 0.12),
+                        child: Icon(
+                          Icons.favorite_rounded,
+                          size: 48,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
@@ -158,11 +184,15 @@ class _SectionTitle extends StatelessWidget {
 class _TeamMemberCard extends StatelessWidget {
   const _TeamMemberCard({
     required this.member,
+    this.roleIcon,
     this.onOpenLink,
+    this.onOpenChannel,
   });
 
   final TeamMember member;
+  final IconData? roleIcon;
   final VoidCallback? onOpenLink;
+  final VoidCallback? onOpenChannel;
 
   @override
   Widget build(BuildContext context) {
@@ -188,16 +218,82 @@ class _TeamMemberCard extends StatelessWidget {
                 Row(
                   children: [
                     Expanded(
-                      child: Text(
-                        member.name,
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.2,
-                          color: textPrimary,
-                        ),
+                      child: Row(
+                        children: [
+                          if (member.isLead) ...[
+                            const Icon(
+                              FluentIcons.crown_24_filled,
+                              size: 18,
+                              color: Color(0xFFC9A227),
+                            ),
+                            const SizedBox(width: 6),
+                          ],
+                          Flexible(
+                            child: Text(
+                              member.name,
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.2,
+                                color: textPrimary,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (roleIcon != null) ...[
+                            const SizedBox(width: 6),
+                            Icon(
+                              roleIcon,
+                              size: 16,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                          ],
+                          if (member.isLead) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(
+                                  0xFFC9A227,
+                                ).withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: const Color(
+                                    0xFFC9A227,
+                                  ).withValues(alpha: 0.5),
+                                ),
+                              ),
+                              child: const Text(
+                                'Главный',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFFC9A227),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
+                    if (onOpenChannel != null)
+                      IconButton(
+                        onPressed: onOpenChannel,
+                        icon: Icon(
+                          Icons.campaign_rounded,
+                          size: 18,
+                          color: textSecondary,
+                        ),
+                        tooltip: 'Открыть канал',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 32,
+                          minHeight: 32,
+                        ),
+                      ),
                     if (onOpenLink != null)
                       IconButton(
                         onPressed: onOpenLink,

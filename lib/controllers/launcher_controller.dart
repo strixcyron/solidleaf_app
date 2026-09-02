@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_constants.dart';
 import '../config/github_config.dart';
 import '../services/cover_accent_loader.dart';
+import '../theme/app_theme.dart';
 import '../services/game_path_finder.dart';
 import '../telegram_auth_service.dart';
 
@@ -29,6 +30,29 @@ class LauncherController extends ChangeNotifier {
   );
 
   bool isDarkMode = true;
+
+  // --- Настройки оформления лаунчера (сохраняются в SharedPreferences) ---
+  /// Включены ли анимации (дождь по стеклу и т.п.).
+  bool animationsEnabled = true;
+
+  /// Адаптивные цвета системы (Material You, Android 12+).
+  bool dynamicColorEnabled = false;
+
+  /// Анимированная обложка (ассет из assets/video/ с откатом на статичную).
+  bool animatedCoverEnabled = false;
+
+  /// Индекс выбранной анимированной обложки (0..6).
+  int animatedCoverIndex = 0;
+
+  /// Выбранный пресет темы.
+  AppThemePreset themePreset = AppThemePreset.dynamicCover;
+
+  /// Пользовательский акцентный цвет (null — цвет из пресета/обложки).
+  Color? customAccent;
+
+  /// Масштаб шрифта интерфейса (1.0 — обычный).
+  double uiScale = 1.0;
+
   bool isDownloading = false;
   /// Какой компонент сейчас качается: `text`, `art` или `null`.
   String? downloadingKind;
@@ -333,6 +357,18 @@ class LauncherController extends ChangeNotifier {
   Future<void> initialize() async {
     final prefs = await SharedPreferences.getInstance();
     isDarkMode = prefs.getBool('is_dark_mode') ?? true;
+    animationsEnabled = prefs.getBool('animations_enabled') ?? true;
+    dynamicColorEnabled = prefs.getBool('dynamic_color') ?? false;
+    animatedCoverEnabled = prefs.getBool('animated_cover') ?? false;
+    animatedCoverIndex = (prefs.getInt('animated_cover_index') ?? 0).clamp(0, 6);
+    final presetName = prefs.getString('theme_preset');
+    themePreset = AppThemePreset.values.firstWhere(
+      (e) => e.name == presetName,
+      orElse: () => AppThemePreset.dynamicCover,
+    );
+    final accentValue = prefs.getInt('custom_accent');
+    customAccent = accentValue == null ? null : Color(accentValue);
+    uiScale = prefs.getDouble('ui_scale') ?? 1.0;
     currentVersion = prefs.getString('installed_version') ?? 'v0.0.0';
     currentArtVersion = prefs.getString('installed_art_version') ?? 'v0.0.0';
     installPath = await _resolveInstallPath(prefs);
@@ -371,6 +407,66 @@ class LauncherController extends ChangeNotifier {
     isDarkMode = !isDarkMode;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('is_dark_mode', isDarkMode);
+    notifyListeners();
+  }
+
+  /// Включить/выключить анимации (дождь и т.п.).
+  Future<void> setAnimationsEnabled(bool value) async {
+    animationsEnabled = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('animations_enabled', value);
+    notifyListeners();
+  }
+
+  /// Задать пользовательский акцентный цвет (null — сбросить на цвет пресета).
+  Future<void> setCustomAccent(Color? color) async {
+    customAccent = color;
+    final prefs = await SharedPreferences.getInstance();
+    if (color == null) {
+      await prefs.remove('custom_accent');
+    } else {
+      await prefs.setInt('custom_accent', color.toARGB32());
+    }
+    notifyListeners();
+  }
+
+  /// Задать масштаб шрифта интерфейса (в диапазоне 0.8–1.4).
+  Future<void> setUiScale(double value) async {
+    uiScale = value.clamp(0.8, 1.4);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('ui_scale', uiScale);
+    notifyListeners();
+  }
+
+  /// Включить/выключить адаптивные цвета системы (Material You).
+  Future<void> setDynamicColor(bool value) async {
+    dynamicColorEnabled = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('dynamic_color', value);
+    notifyListeners();
+  }
+
+  /// Включить/выключить анимированную обложку.
+  Future<void> setAnimatedCover(bool value) async {
+    animatedCoverEnabled = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('animated_cover', value);
+    notifyListeners();
+  }
+
+  /// Выбрать вариант анимированной обложки (0..6).
+  Future<void> setAnimatedCoverIndex(int index) async {
+    animatedCoverIndex = index.clamp(0, 6);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('animated_cover_index', animatedCoverIndex);
+    notifyListeners();
+  }
+
+  /// Выбрать пресет темы.
+  Future<void> setThemePreset(AppThemePreset preset) async {
+    themePreset = preset;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('theme_preset', preset.name);
     notifyListeners();
   }
 
