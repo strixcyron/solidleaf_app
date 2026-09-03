@@ -13,9 +13,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_constants.dart';
 import '../config/github_config.dart';
 import '../services/cover_accent_loader.dart';
-import '../theme/app_theme.dart';
 import '../services/game_path_finder.dart';
+import '../services/process_tracker_service.dart';
 import '../telegram_auth_service.dart';
+import '../theme/app_theme.dart';
+import '../utils/install_errors.dart';
 
 class LauncherController extends ChangeNotifier {
   final Dio _dio = Dio(
@@ -62,6 +64,14 @@ class LauncherController extends ChangeNotifier {
   double downloadProgress = 0;
   String installPath = '';
   bool isInstallPathValid = false;
+
+  /// Windows: ждём запуска Reverse1999.exe для автоопределения пути.
+  bool isWaitingForGameProcess = false;
+
+  /// Кратковременный флаг «путь только что пойман» — для анимации в UI.
+  bool gamePathJustDetected = false;
+
+  final ProcessTrackerService _processTracker = ProcessTrackerService();
   String currentVersion = 'v0.0.0';
   String currentArtVersion = 'v0.0.0';
   String remoteVersion = '—';
@@ -350,6 +360,7 @@ class LauncherController extends ChangeNotifier {
 
   @override
   void dispose() {
+    stopGameProcessWatch();
     telegramAuth.dispose();
     super.dispose();
   }
@@ -379,8 +390,10 @@ class LauncherController extends ChangeNotifier {
       addLog('Папка игры: $installPath');
     } else if (Platform.isWindows) {
       addLog(
-        'Игра не найдена автоматически — укажите папку с $_gameDataFolderHint',
+        'Игра не найдена автоматически — запустите игру через ярлык '
+        'или укажите папку с $_gameDataFolderHint',
       );
+      startGameProcessWatch();
     }
     await GitHubConfig.warmUp();
     debugPrint('[GitHubConfig] ${GitHubConfig.debugState}');
@@ -1352,22 +1365,31 @@ class LauncherController extends ChangeNotifier {
 
   Future<void> selectInstallPath() async {
     final selected = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: 'Выберите папку с игрой (где лежит $_gameDataFolderHint)',
+      dialogTitle:
+          'Выберите папку с игрой (где лежит ${GamePathFinder.dataFolderName})',
     );
-    if (selected != null && selected.isNotEmpty) {
-      installPath = selected;
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(GamePathFinder.prefsKey, selected);
-      _refreshInstallPathState();
-      if (isInstallPathValid) {
-        addLog('Папка игры: $installPath');
-      } else {
-        addLog(
-          'Папка выбрана, но $_gameDataFolderHint не найдена — проверьте путь',
-        );
-      }
-      notifyListeners();
+    if (selected == null || selected.isEmpty) {
+      return;
     }
+
+    // Не сохраняем некорректный путь — иначе установка уйдёт «в никуда».
+    final error = GamePathFinder.validationError(selected);
+    if (error != null) {
+      lastUserError = error;
+      statusText = error;
+      addLog('Выбор папки отклонён: $error');
+      notifyListeners();
+      return;
+    }
+
+    installPath = selected;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(GamePathFinder.prefsKey, selected);
+    _refreshInstallPathState();
+    stopGameProcessWatch();
+    lastUserError = null;
+    addLog('Папка игры: $installPath');
+    notifyListeners();
   }
 
   /// Повторный автопоиск (если игра установилась после запуска лаунчера).
@@ -1378,65 +1400,159 @@ class LauncherController extends ChangeNotifier {
 
     final found = await GamePathFinder.findWindowsGamePath();
     if (found == null) {
-      addLog('Автопоиск: игра не найдена на дисках');
+      addLog('Автопоиск: игра не найдена на дисках — ждём запуск процесса');
+      startGameProcessWatch();
       notifyListeners();
       return;
     }
 
+    await _applyDetectedGamePath(found, source: 'автопоиск по дискам/реестру');
+  }
+
+  /// Старт мониторинга Reverse1999.exe (только Windows, только если путь ещё невалиден).
+  void startGameProcessWatch() {
+    if (!Platform.isWindows || isInstallPathValid) {
+      return;
+    }
+    if (_processTracker.isRunning) {
+      isWaitingForGameProcess = true;
+      notifyListeners();
+      return;
+    }
+
+    isWaitingForGameProcess = true;
+    addLog('Мониторинг процесса: ожидание Reverse1999.exe...');
+    notifyListeners();
+
+    _processTracker.start(
+      onFound: (gameDir) {
+        unawaited(_onGameProcessFound(gameDir));
+      },
+    );
+  }
+
+  /// Пауза при сворачивании / уходе приложения в фон.
+  void pauseGameProcessWatch() {
+    if (!_processTracker.isRunning && !isWaitingForGameProcess) return;
+    _processTracker.stop();
+    // Флаг ожидания оставляем — UI покажет, что мониторинг на паузе при необходимости.
+    notifyListeners();
+  }
+
+  /// Возобновление после разворота окна, если путь всё ещё неизвестен.
+  void resumeGameProcessWatch() {
+    if (!Platform.isWindows || isInstallPathValid) return;
+    startGameProcessWatch();
+  }
+
+  /// Полная остановка (успех, dispose, ручной выбор пути).
+  void stopGameProcessWatch() {
+    _processTracker.stop();
+    if (isWaitingForGameProcess) {
+      isWaitingForGameProcess = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _onGameProcessFound(String gameDir) async {
+    if (!GamePathFinder.isValidGamePath(gameDir)) {
+      // Процесс есть, но рядом нет reverse1999_Data — продолжаем ждать.
+      addLog(
+        'Процесс найден ($gameDir), но нет ${GamePathFinder.dataFolderName} — продолжаем ожидание',
+      );
+      startGameProcessWatch();
+      return;
+    }
+    await _applyDetectedGamePath(gameDir, source: 'процесс Reverse1999.exe');
+  }
+
+  Future<void> _applyDetectedGamePath(
+    String found, {
+    required String source,
+  }) async {
     installPath = found;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(GamePathFinder.prefsKey, found);
     _refreshInstallPathState();
-    addLog('Автопоиск: найдена игра — $installPath');
+    stopGameProcessWatch();
+    gamePathJustDetected = true;
+    lastUserError = null;
+    statusText = 'Папка игры определена';
+    addLog('Путь к игре ($source): $installPath');
     notifyListeners();
+
+    // Гасим «успех» через пару секунд.
+    Future<void>.delayed(const Duration(seconds: 3), () {
+      if (gamePathJustDetected) {
+        gamePathJustDetected = false;
+        notifyListeners();
+      }
+    });
   }
 
   Future<void> installOrUpdate() async {
-    if (!Platform.isAndroid && !isInstallPathValid) {
-      await detectInstallPath();
-      if (!isInstallPathValid) {
-        statusText = 'Укажите папку с установленной игрой';
-        addLog(statusText);
+    try {
+      if (!Platform.isAndroid && !isInstallPathValid) {
+        await detectInstallPath();
+        if (!isInstallPathValid) {
+          _failInstall(
+            PatchInstallException(
+              'Укажите папку с установленной игрой '
+              '(нужна папка ${GamePathFinder.dataFolderName}).',
+            ),
+          );
+          return;
+        }
+      }
+
+      if (remoteVersion == '—') {
+        await checkForUpdates();
+      }
+
+      if (!hasUpdate && currentVersion != 'v0.0.0') {
+        addLog('Обновлений не требуется. Установка уже актуальна.');
+        statusText = 'Установлена актуальная версия';
+        lastUserError = null;
         notifyListeners();
         return;
       }
-    }
 
-    if (remoteVersion == '—') {
-      await checkForUpdates();
+      final asset = await _getAssets();
+      await _downloadAndInstallReleaseAsset(asset, kind: 'text');
+    } catch (e) {
+      _failInstall(e);
     }
-
-    if (!hasUpdate && currentVersion != 'v0.0.0') {
-      addLog('Обновлений не требуется. Установка уже актуальна.');
-      statusText = 'Установлена актуальная версия';
-      notifyListeners();
-      return;
-    }
-
-    final asset = await _getAssets();
-    await _downloadAndInstallReleaseAsset(asset, kind: 'text');
   }
 
   Future<void> installArtPack() async {
-    if (!isPremium) {
-      statusText = 'Текстуры доступны только с платной подпиской.';
-      addLog(statusText);
-      notifyListeners();
-      return;
-    }
-
-    if (!Platform.isAndroid && !isInstallPathValid) {
-      await detectInstallPath();
-      if (!isInstallPathValid) {
-        statusText = 'Укажите папку с установленной игрой';
-        addLog(statusText);
-        notifyListeners();
+    try {
+      if (!isPremium) {
+        _failInstall(
+          PatchInstallException(
+            'Текстуры доступны только с платной подпиской.',
+          ),
+        );
         return;
       }
-    }
 
-    final asset = await _getArtAsset();
-    await _downloadAndInstallReleaseAsset(asset, kind: 'art');
+      if (!Platform.isAndroid && !isInstallPathValid) {
+        await detectInstallPath();
+        if (!isInstallPathValid) {
+          _failInstall(
+            PatchInstallException(
+              'Укажите папку с установленной игрой '
+              '(нужна папка ${GamePathFinder.dataFolderName}).',
+            ),
+          );
+          return;
+        }
+      }
+
+      final asset = await _getArtAsset();
+      await _downloadAndInstallReleaseAsset(asset, kind: 'art');
+    } catch (e) {
+      _failInstall(e);
+    }
   }
 
 
@@ -1445,6 +1561,7 @@ class LauncherController extends ChangeNotifier {
     final assetKind = kind == 'art' ? 'art' : 'full';
 
     try {
+      _resetInstallUiState();
       isDownloading = true;
       downloadingKind = kind;
       downloadProgress = 0;
@@ -1499,18 +1616,13 @@ class LauncherController extends ChangeNotifier {
       );
       notifyListeners();
     } on TelegramAuthException catch (e) {
-      isDownloading = false;
-      downloadingKind = null;
-      statusText = e.message;
-      addLog(statusText);
-      notifyListeners();
+      _failInstall(e);
+    } on FileSystemException catch (e) {
+      _failInstall(e);
+    } on PatchInstallException catch (e) {
+      _failInstall(e);
     } catch (error) {
-      isDownloading = false;
-      downloadingKind = null;
-      final message = 'Ошибка установки: ${error.toString()}';
-      statusText = message;
-      addLog(message);
-      notifyListeners();
+      _failInstall(error);
     }
   }
 
@@ -1525,13 +1637,16 @@ class LauncherController extends ChangeNotifier {
 
     final zipUrl = _resolveAssetDownloadUrl(asset);
     if (zipUrl == null || zipUrl.isEmpty) {
-      throw DioException(
-        requestOptions: RequestOptions(path: _activeReleaseApiUrl),
-        error: 'Не удалось найти zip-архив в GitHub Releases',
+      _failInstall(
+        PatchInstallException(
+          'Не удалось найти zip-архив в GitHub Releases',
+        ),
       );
+      return;
     }
 
     try {
+      _resetInstallUiState();
       isDownloading = true;
       downloadingKind = kind;
       downloadProgress = 0;
@@ -1611,14 +1726,21 @@ class LauncherController extends ChangeNotifier {
     } on DioException catch (error) {
       isDownloading = false;
       downloadingKind = null;
+      lastUserError = describeInstallError(
+        PatchInstallException(
+          error.message ?? 'Ошибка загрузки: ${error.toString()}',
+        ),
+      );
       _handleDioError(error);
-    } catch (error) {
-      isDownloading = false;
-      downloadingKind = null;
-      final message = 'Ошибка установки: ${error.toString()}';
-      statusText = message;
-      addLog(message);
+      // Дополняем lastUserError из statusText, если Dio handler его выставил.
+      lastUserError ??= statusText;
       notifyListeners();
+    } on FileSystemException catch (e) {
+      _failInstall(e);
+    } on PatchInstallException catch (e) {
+      _failInstall(e);
+    } catch (error) {
+      _failInstall(error);
     }
   }
 
@@ -1658,6 +1780,26 @@ class LauncherController extends ChangeNotifier {
   int lastInstallFileCount = 0;
   List<String> lastBackupFiles = [];
   String? lastBackupKind;
+
+  /// Последняя ошибка установки для AlertDialog (null = успеха/нет ошибки).
+  String? lastUserError;
+
+  void _resetInstallUiState() {
+    lastInstallSource = null;
+    lastInstallTarget = null;
+    lastInstallFileCount = 0;
+    lastUserError = null;
+  }
+
+  void _failInstall(Object error, {String? pathHint}) {
+    final message = describeInstallError(error, pathHint: pathHint);
+    lastUserError = message;
+    statusText = message;
+    addLog(message);
+    isDownloading = false;
+    downloadingKind = null;
+    notifyListeners();
+  }
 
   Future<void> _extractArchive(
     String zipPath,
@@ -1791,75 +1933,143 @@ class LauncherController extends ChangeNotifier {
       return;
     }
 
-    final archiveFile = File(zipPath);
-    final bytes = await archiveFile.readAsBytes();
-    final archive = ZipDecoder().decodeBytes(bytes);
-
-    final dir = Directory(targetDir);
-    if (!await dir.exists()) {
-      await dir.create(recursive: true);
-    }
-
-    final extractedDir = Directory(
-      '${dir.path}/.solidleaf_extract_${DateTime.now().millisecondsSinceEpoch}',
-    );
-    await extractedDir.create(recursive: true);
-
+    // --- Windows / desktop: распаковка в temp + копирование с бэкапом ---
     try {
-      for (final file in archive) {
-        final outPath = path.join(extractedDir.path, file.name);
-        if (file.isFile) {
-          final data = file.content as List<int>;
-          final outFile = File(outPath);
-          await outFile.parent.create(recursive: true);
-          await outFile.writeAsBytes(data);
-        } else {
-          await Directory(outPath).create(recursive: true);
+      if (!GamePathFinder.isValidGamePath(targetDir)) {
+        throw PatchInstallException(
+          'Неверный путь к игре: нет папки ${GamePathFinder.dataFolderName}.\n'
+          'Укажите корень установки Reverse: 1999.',
+        );
+      }
+
+      final archiveFile = File(zipPath);
+      final bytes = await archiveFile.readAsBytes();
+      final archive = ZipDecoder().decodeBytes(bytes);
+
+      final dir = Directory(targetDir);
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+
+      final extractedDir = Directory(
+        '${dir.path}/.solidleaf_extract_${DateTime.now().millisecondsSinceEpoch}',
+      );
+      await extractedDir.create(recursive: true);
+
+      try {
+        for (final file in archive) {
+          final outPath = path.join(extractedDir.path, file.name);
+          try {
+            if (file.isFile) {
+              final data = file.content as List<int>;
+              final outFile = File(outPath);
+              await outFile.parent.create(recursive: true);
+              await outFile.writeAsBytes(data);
+            } else {
+              await Directory(outPath).create(recursive: true);
+            }
+          } on FileSystemException catch (e) {
+            throw PatchInstallException(
+              describeInstallError(e, pathHint: outPath),
+              needsAdmin: isAccessDeniedError(e),
+            );
+          }
+        }
+
+        final sourceDirectory = extractedDir;
+        final allFiles = sourceDirectory.existsSync()
+            ? sourceDirectory
+                .listSync(recursive: true)
+                .whereType<File>()
+                .toList()
+            : <File>[];
+
+        final backupDirPath = _backupFolderName();
+        final backupDir = Directory(backupDirPath);
+        if (await backupDir.exists()) {
+          await backupDir.delete(recursive: true);
+        }
+        await backupDir.create(recursive: true);
+
+        for (final f in allFiles) {
+          final rel = path.relative(f.path, from: sourceDirectory.path);
+          final targetPath = path.join(targetDir, rel);
+          final targetFile = File(targetPath);
+          if (!await targetFile.exists()) {
+            continue;
+          }
+          try {
+            final backupFile = File(path.join(backupDirPath, rel));
+            await backupFile.parent.create(recursive: true);
+            await targetFile.copy(backupFile.path);
+          } on FileSystemException catch (e) {
+            addLog('Бэкап пропущен ($rel): ${e.message}');
+          }
+        }
+
+        Object? firstWriteError;
+        var written = 0;
+        for (final file in archive) {
+          final targetPath = path.join(dir.path, file.name);
+          try {
+            if (file.isFile) {
+              final data = file.content as List<int>;
+              final targetFile = File(targetPath);
+              await targetFile.parent.create(recursive: true);
+              await targetFile.writeAsBytes(data);
+              written++;
+            } else {
+              await Directory(targetPath).create(recursive: true);
+            }
+          } on FileSystemException catch (e) {
+            firstWriteError ??= e;
+            addLog(
+              'Не удалось записать $targetPath: ${e.osError?.message ?? e.message}',
+            );
+          }
+        }
+
+        if (written == 0 && allFiles.isNotEmpty) {
+          throw PatchInstallException(
+            describeInstallError(
+              firstWriteError ??
+                  Exception('Не удалось записать файлы в папку игры'),
+              pathHint: targetDir,
+            ),
+            needsAdmin: firstWriteError != null &&
+                isAccessDeniedError(firstWriteError),
+          );
+        }
+
+        if (firstWriteError != null && isAccessDeniedError(firstWriteError)) {
+          throw PatchInstallException(
+            describeInstallError(firstWriteError, pathHint: targetDir),
+            needsAdmin: true,
+          );
+        }
+
+        lastInstallSource = sourceDirectory.path;
+        lastInstallTarget = targetDir;
+        lastInstallFileCount = written;
+      } finally {
+        try {
+          if (await extractedDir.exists()) {
+            await extractedDir.delete(recursive: true);
+          }
+        } catch (e) {
+          addLog('Не удалось удалить временную папку: $e');
         }
       }
-
-      final sourceDirectory = extractedDir;
-      final allFiles = sourceDirectory.existsSync()
-          ? sourceDirectory.listSync(recursive: true).whereType<File>().toList()
-          : <File>[];
-
-      final backupDirPath = _backupFolderName();
-      final backupDir = Directory(backupDirPath);
-      if (await backupDir.exists()) {
-        await backupDir.delete(recursive: true);
-      }
-      await backupDir.create(recursive: true);
-
-      for (final f in allFiles) {
-        final rel = path.relative(f.path, from: sourceDirectory.path);
-        final targetPath = path.join(targetDir, rel);
-        final targetFile = File(targetPath);
-        if (!await targetFile.exists()) {
-          continue;
-        }
-        final backupFile = File(path.join(backupDirPath, rel));
-        await backupFile.parent.create(recursive: true);
-        await targetFile.copy(backupFile.path);
-      }
-
-      for (final file in archive) {
-        final targetFile = File('${dir.path}/${file.name}');
-        if (file.isFile) {
-          final data = file.content as List<int>;
-          await targetFile.parent.create(recursive: true);
-          await targetFile.writeAsBytes(data);
-        } else {
-          await Directory('${dir.path}/${file.name}').create(recursive: true);
-        }
-      }
-
-      lastInstallSource = sourceDirectory.path;
-      lastInstallTarget = targetDir;
-      lastInstallFileCount = allFiles.length;
-    } finally {
-      if (await extractedDir.exists()) {
-        await extractedDir.delete(recursive: true);
-      }
+    } on PatchInstallException {
+      rethrow;
+    } on FileSystemException catch (e) {
+      throw PatchInstallException(
+        describeInstallError(e, pathHint: targetDir),
+        needsAdmin: isAccessDeniedError(e),
+      );
+    } catch (e) {
+      addLog('Ошибка распаковки/копирования архива: $e');
+      throw PatchInstallException(describeInstallError(e, pathHint: targetDir));
     }
   }
 

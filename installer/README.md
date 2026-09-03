@@ -10,8 +10,12 @@
 powershell -ExecutionPolicy Bypass -File installer\build_installer.ps1
 ```
 
-Скрипт сам соберёт релиз (`flutter build windows --release`) и упакует его в
-установщик. Готовый файл появится в `installer\output\`.
+Скрипт сам соберёт **обфусцированный** релиз
+(`flutter build windows --release --obfuscate --split-debug-info=...`)
+и упакует его в установщик. Готовый файл появится в `installer\output\`.
+
+Карты символов для расшифровки крашей: `build\debug-info\` — **не** кладите
+их в установщик и не выкладывайте публично.
 
 ## Что нужно установить один раз
 

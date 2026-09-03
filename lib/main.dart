@@ -8,20 +8,36 @@ import 'package:window_manager/window_manager.dart';
 import 'controllers/launcher_controller.dart';
 import 'screens/login_screen.dart';
 import 'theme/app_theme.dart';
+import 'utils/single_instance.dart';
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Одна копия лаунчера: второй процесс сразу выходит.
+  final isFirst = await SingleInstanceGuard.ensureSingleInstance();
+  if (!isFirst) {
+    exit(0);
+  }
 
   if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
     await windowManager.ensureInitialized();
+
+    const minSize = Size(960, 600);
+    const defaultSize = Size(1024, 640);
+
     const windowOptions = WindowOptions(
-      size: Size(1180, 760),
+      size: defaultSize,
+      minimumSize: minSize,
       center: true,
-      backgroundColor: Colors.transparent,
+      backgroundColor: Color(0xFF111019),
       skipTaskbar: false,
       titleBarStyle: TitleBarStyle.hidden,
     );
+
     windowManager.waitUntilReadyToShow(windowOptions, () async {
+      await windowManager.setMinimumSize(minSize);
+      // Сброс битых/нулевых размеров после странного DPI или прошлой сессии.
+      await _ensureSaneWindowGeometry(minSize: minSize, defaultSize: defaultSize);
       await windowManager.show();
       await windowManager.focus();
     });
@@ -33,6 +49,31 @@ void main() async {
       child: const LocalizationLauncher(),
     ),
   );
+}
+
+/// Если окно меньше минимума или размеры «нулевые» — ставим дефолт и центр.
+Future<void> _ensureSaneWindowGeometry({
+  required Size minSize,
+  required Size defaultSize,
+}) async {
+  try {
+    final bounds = await windowManager.getBounds();
+    final w = bounds.width;
+    final h = bounds.height;
+    final broken = w.isNaN ||
+        h.isNaN ||
+        w < minSize.width ||
+        h < minSize.height ||
+        w > 10000 ||
+        h > 10000;
+    if (broken) {
+      await windowManager.setSize(defaultSize);
+      await windowManager.center();
+    }
+  } catch (_) {
+    await windowManager.setSize(defaultSize);
+    await windowManager.center();
+  }
 }
 
 class LocalizationLauncher extends StatelessWidget {

@@ -1,18 +1,25 @@
-# Собирает релизную Windows-версию и упаковывает её в установщик через Inno Setup.
-# Запуск из корня проекта:
+# Builds an obfuscated Windows release and packs it with Inno Setup.
+# From project root:
 #   powershell -ExecutionPolicy Bypass -File installer\build_installer.ps1
+#
+# Obfuscation: flutter --obfuscate + --split-debug-info
+# Scrambles Dart symbols in data\app.so (native .exe/.dll stay as-is).
+# Symbol maps go to build\debug-info\ - keep them private for crash decoding.
 
 $ErrorActionPreference = "Stop"
 
-# Переходим в корень проекта (на уровень выше папки installer).
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $projectRoot
 
-Write-Host "==> Сборка релизной версии Flutter (Windows)..." -ForegroundColor Cyan
-flutter build windows --release
-if ($LASTEXITCODE -ne 0) { throw "flutter build windows завершился с ошибкой." }
+$debugInfoDir = Join-Path $projectRoot "build\debug-info"
+New-Item -ItemType Directory -Force -Path $debugInfoDir | Out-Null
 
-# Ищем компилятор Inno Setup (ISCC.exe).
+Write-Host "==> Flutter Windows release (obfuscate)..." -ForegroundColor Cyan
+flutter build windows --release `
+  --obfuscate `
+  --split-debug-info="$debugInfoDir"
+if ($LASTEXITCODE -ne 0) { throw "flutter build windows failed." }
+
 $isccCandidates = @(
     "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
     "C:\Program Files\Inno Setup 6\ISCC.exe"
@@ -25,15 +32,17 @@ if (-not $iscc) {
 
 if (-not $iscc) {
     Write-Host ""
-    Write-Host "Inno Setup не найден." -ForegroundColor Yellow
-    Write-Host "Установите его командой:  winget install JRSoftware.InnoSetup" -ForegroundColor Yellow
-    Write-Host "или скачайте с https://jrsoftware.org/isdl.php и запустите скрипт снова." -ForegroundColor Yellow
+    Write-Host "Inno Setup not found." -ForegroundColor Yellow
+    Write-Host "Install: choco install innosetup -y" -ForegroundColor Yellow
+    Write-Host "or https://jrsoftware.org/isdl.php" -ForegroundColor Yellow
     exit 1
 }
 
-Write-Host "==> Компиляция установщика ($iscc)..." -ForegroundColor Cyan
+Write-Host "==> Compiling installer ($iscc)..." -ForegroundColor Cyan
 & $iscc "installer\re1999_solidleaf.iss"
-if ($LASTEXITCODE -ne 0) { throw "ISCC завершился с ошибкой." }
+if ($LASTEXITCODE -ne 0) { throw "ISCC failed." }
 
 Write-Host ""
-Write-Host "Готово! Установщик в installer\output\" -ForegroundColor Green
+Write-Host "Done!" -ForegroundColor Green
+Write-Host "  Installer:   installer\output\SolidLeafLauncher-Setup-*.exe"
+Write-Host "  Debug-info:  build\debug-info\  (keep private, do not ship)"

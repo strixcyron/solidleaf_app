@@ -54,14 +54,68 @@ const _libraryGames = [
   ),
 ];
 
-class _MainScreenState extends State<MainScreen> {
+class _MainScreenState extends State<MainScreen>
+    with WindowListener, WidgetsBindingObserver {
   final ScrollController _mainScrollController = ScrollController();
   bool _ctaHighlight = false;
+  LauncherController? _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      windowManager.addListener(this);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<LauncherController>().initialize();
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _controller = context.read<LauncherController>();
+  }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      windowManager.removeListener(this);
+    }
+    _controller?.stopGameProcessWatch();
     _mainScrollController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final controller = _controller;
+    if (controller == null) return;
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden) {
+      controller.pauseGameProcessWatch();
+    } else if (state == AppLifecycleState.resumed) {
+      controller.resumeGameProcessWatch();
+    }
+  }
+
+  @override
+  void onWindowMinimize() {
+    _controller?.pauseGameProcessWatch();
+  }
+
+  @override
+  void onWindowRestore() {
+    _controller?.resumeGameProcessWatch();
+  }
+
+  @override
+  void onWindowClose() {
+    _controller?.stopGameProcessWatch();
   }
 
   Future<void> _focusGameInMainPanel(LauncherController controller) async {
@@ -323,15 +377,6 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      context.read<LauncherController>().initialize();
-    });
-  }
-
   Future<void> _runInstallFlow() async {
     final controller = context.read<LauncherController>();
 
@@ -339,40 +384,50 @@ class _MainScreenState extends State<MainScreen> {
 
     try {
       await controller.installOrUpdate();
-      if (mounted) {
-        final src = controller.lastInstallSource;
-        if (src != null) {
-          await showConfettiBurst(context);
-          if (!mounted) return;
-          final tgt = controller.lastInstallTarget ?? '';
-          final count = controller.lastInstallFileCount;
-          await showDialog<void>(
-            context: context,
-            builder: (ctx) => AlertDialog(
-              backgroundColor: Theme.of(context).cardColor,
-              title: Text(
-                'Установка успешно завершена',
-                style: TextStyle(
-                  color: Theme.of(context).textTheme.bodyMedium?.color,
-                ),
-              ),
-              content: Text(
-                'Откуда: $src\nКуда: $tgt\nСкопировано файлов: $count',
-                style: TextStyle(
-                  color: Theme.of(context).textTheme.bodySmall?.color,
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  child: const Text('ОК'),
-                ),
-              ],
-            ),
-          );
-        }
+      if (!mounted) return;
+
+      if (controller.lastUserError != null) {
+        await _showInstallErrorDialog(controller.lastUserError!);
+        return;
       }
-    } catch (_) {}
+
+      final src = controller.lastInstallSource;
+      if (src != null) {
+        await showConfettiBurst(context);
+        if (!mounted) return;
+        final tgt = controller.lastInstallTarget ?? '';
+        final count = controller.lastInstallFileCount;
+        await showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: Theme.of(context).cardColor,
+            title: Text(
+              'Установка успешно завершена',
+              style: TextStyle(
+                color: Theme.of(context).textTheme.bodyMedium?.color,
+              ),
+            ),
+            content: Text(
+              'Откуда: $src\nКуда: $tgt\nСкопировано файлов: $count',
+              style: TextStyle(
+                color: Theme.of(context).textTheme.bodySmall?.color,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('ОК'),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      await _showInstallErrorDialog(
+        e.toString().replaceFirst(RegExp(r'^Exception:\s*'), ''),
+      );
+    }
   }
 
   Future<void> _runArtInstallFlow() async {
@@ -382,40 +437,91 @@ class _MainScreenState extends State<MainScreen> {
 
     try {
       await controller.installArtPack();
-      if (mounted) {
-        final src = controller.lastInstallSource;
-        if (src != null) {
-          await showConfettiBurst(context);
-          if (!mounted) return;
-          final tgt = controller.lastInstallTarget ?? '';
-          final count = controller.lastInstallFileCount;
-          await showDialog<void>(
-            context: context,
-            builder: (ctx) => AlertDialog(
-              backgroundColor: Theme.of(context).cardColor,
-              title: Text(
-                'Текстуры установлены',
+      if (!mounted) return;
+
+      if (controller.lastUserError != null) {
+        await _showInstallErrorDialog(controller.lastUserError!);
+        return;
+      }
+
+      final src = controller.lastInstallSource;
+      if (src != null) {
+        await showConfettiBurst(context);
+        if (!mounted) return;
+        final tgt = controller.lastInstallTarget ?? '';
+        final count = controller.lastInstallFileCount;
+        await showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: Theme.of(context).cardColor,
+            title: Text(
+              'Текстуры установлены',
+              style: TextStyle(
+                color: Theme.of(context).textTheme.bodyMedium?.color,
+              ),
+            ),
+            content: Text(
+              'Откуда: $src\nКуда: $tgt\nСкопировано файлов: $count',
+              style: TextStyle(
+                color: Theme.of(context).textTheme.bodySmall?.color,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('ОК'),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      await _showInstallErrorDialog(
+        e.toString().replaceFirst(RegExp(r'^Exception:\s*'), ''),
+      );
+    }
+  }
+
+  /// Диалог ошибки установки — процесс лаунчера не завершается.
+  Future<void> _showInstallErrorDialog(String message) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(context).cardColor,
+        title: Row(
+          children: [
+            Icon(
+              Icons.error_outline_rounded,
+              color: Theme.of(context).colorScheme.error,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Ошибка установки',
                 style: TextStyle(
                   color: Theme.of(context).textTheme.bodyMedium?.color,
                 ),
               ),
-              content: Text(
-                'Откуда: $src\nКуда: $tgt\nСкопировано файлов: $count',
-                style: TextStyle(
-                  color: Theme.of(context).textTheme.bodySmall?.color,
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  child: const Text('ОК'),
-                ),
-              ],
             ),
-          );
-        }
-      }
-    } catch (_) {}
+          ],
+        ),
+        content: Text(
+          message,
+          style: TextStyle(
+            color: Theme.of(context).textTheme.bodySmall?.color,
+            height: 1.35,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('ОК'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _showInstallChoiceDialog(LauncherController controller) async {
@@ -466,6 +572,46 @@ class _MainScreenState extends State<MainScreen> {
     if (choice == 'text') {
       await _runInstallFlow();
     } else if (choice == 'art') {
+      await _runArtInstallFlow();
+    }
+  }
+
+  /// True, если текст уже ставили (не «чистая» установка).
+  bool _isTextInstalled(LauncherController c) => c.currentVersion != 'v0.0.0';
+
+  /// True, если текстуры уже ставили.
+  bool _isArtInstalled(LauncherController c) => c.currentArtVersion != 'v0.0.0';
+
+  /// Главная кнопка: обновление без диалога, если стоят обе локализации;
+  /// диалог выбора — при установке или если стоит только одна из них.
+  Future<void> _handlePrimaryAction(LauncherController controller) async {
+    final hasUpdates = controller.hasUpdate || controller.hasArtUpdate;
+    final bothInstalled =
+        _isTextInstalled(controller) && _isArtInstalled(controller);
+
+    if (hasUpdates && bothInstalled) {
+      await _runBatchUpdate(controller);
+      return;
+    }
+
+    // Первичная установка или стоит только текст/только текстуры → выбор.
+    await _showInstallChoiceDialog(controller);
+  }
+
+  /// Обновляет все доступные компоненты подряд без диалога выбора.
+  Future<void> _runBatchUpdate(LauncherController controller) async {
+    if (!mounted) return;
+
+    final needText = controller.hasUpdate;
+    final needArt = controller.hasArtUpdate && controller.isPremium;
+
+    if (needText) {
+      await _runInstallFlow();
+      if (!mounted) return;
+      if (controller.lastUserError != null) return;
+    }
+
+    if (needArt) {
       await _runArtInstallFlow();
     }
   }
@@ -588,7 +734,8 @@ class _MainScreenState extends State<MainScreen> {
     if (controller.hasUpdate || controller.hasArtUpdate) {
       return 'Обновить';
     }
-    if (controller.currentVersion == 'v0.0.0') {
+    if (controller.currentVersion == 'v0.0.0' ||
+        controller.currentArtVersion == 'v0.0.0') {
       return 'Установить';
     }
     return 'Установлено';
@@ -596,13 +743,19 @@ class _MainScreenState extends State<MainScreen> {
 
   bool _primaryActionEnabled(LauncherController controller) {
     if (controller.isDownloading) return false;
-    if (controller.hasUpdate ||
-        controller.hasArtUpdate ||
-        controller.currentVersion == 'v0.0.0') {
+    // На Windows без валидного пути игру нельзя патчить.
+    if (!Platform.isAndroid && !controller.isInstallPathValid) return false;
+    if (controller.hasUpdate || controller.hasArtUpdate) return true;
+    // Установка: ничего не стоит или стоит только одна локализация.
+    if (controller.currentVersion == 'v0.0.0' ||
+        controller.currentArtVersion == 'v0.0.0') {
       return true;
     }
     return false;
   }
+
+  /// Оранжевый акцент для кнопки «Обновить».
+  static const _updateAccent = Color(0xFFD97706);
 
   Widget _buildHeroSection(
     LauncherController controller, {
@@ -622,60 +775,68 @@ class _MainScreenState extends State<MainScreen> {
           children: [
             Expanded(
               flex: 2,
-              child: MagneticHover(
-                child: ArcaneHoverBorder(
-                  borderRadius: 12,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 300),
-                    curve: Curves.easeOut,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: highlightCta
-                          ? [
-                              BoxShadow(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .primary
-                                    .withValues(alpha: 0.55),
-                                blurRadius: 18,
-                                spreadRadius: 1,
-                              ),
-                            ]
-                          : null,
-                    ),
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor:
-                            Theme.of(context).colorScheme.primary,
-                        disabledBackgroundColor:
-                            const Color(0xFF2E7D32).withValues(alpha: 0.35),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
+              child: Builder(
+                builder: (context) {
+                  final isUpdateAction = !controller.isDownloading &&
+                      (controller.hasUpdate || controller.hasArtUpdate);
+                  final accent = isUpdateAction
+                      ? _updateAccent
+                      : Theme.of(context).colorScheme.primary;
+
+                  return MagneticHover(
+                    child: ArcaneHoverBorder(
+                      borderRadius: 12,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 300),
+                        curve: Curves.easeOut,
+                        decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(12),
+                          boxShadow: (highlightCta || isUpdateAction)
+                              ? [
+                                  BoxShadow(
+                                    color: accent.withValues(
+                                      alpha: isUpdateAction ? 0.65 : 0.55,
+                                    ),
+                                    blurRadius: isUpdateAction ? 22 : 18,
+                                    spreadRadius: isUpdateAction ? 2 : 1,
+                                  ),
+                                ]
+                              : null,
                         ),
-                      ),
-                      onPressed: _primaryActionEnabled(controller)
-                          ? () => _showInstallChoiceDialog(controller)
-                          : null,
-                      icon: Icon(
-                        controller.isDownloading
-                            ? Icons.downloading_rounded
-                            : controller.hasUpdate || controller.hasArtUpdate
-                                ? Icons.system_update_alt_rounded
-                                : Icons.download_rounded,
-                        color: Colors.white,
-                      ),
-                      label: Text(
-                        _primaryActionLabel(controller),
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15,
-                          color: Colors.white,
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: accent,
+                            disabledBackgroundColor: const Color(0xFF2E7D32)
+                                .withValues(alpha: 0.35),
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          onPressed: _primaryActionEnabled(controller)
+                              ? () => _handlePrimaryAction(controller)
+                              : null,
+                          icon: Icon(
+                            controller.isDownloading
+                                ? Icons.downloading_rounded
+                                : isUpdateAction
+                                    ? Icons.system_update_alt_rounded
+                                    : Icons.download_rounded,
+                            color: Colors.white,
+                          ),
+                          label: Text(
+                            _primaryActionLabel(controller),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: Colors.white,
+                            ),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ),
+                  );
+                },
               ),
             ),
             const SizedBox(width: 10),
@@ -700,6 +861,100 @@ class _MainScreenState extends State<MainScreen> {
           ],
         ),
       ],
+    );
+  }
+
+  /// Баннер first-run: ждём процесс игры или показываем успех автоопределения.
+  Widget _buildGamePathOnboardingBanner(LauncherController controller) {
+    final scheme = Theme.of(context).colorScheme;
+    final textPrimary = Theme.of(context).textTheme.bodyMedium?.color;
+    final textSecondary = Theme.of(context).textTheme.bodySmall?.color;
+
+    if (controller.gamePathJustDetected) {
+      return AnimatedContainer(
+        duration: const Duration(milliseconds: 280),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF2E7D32).withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFF2E7D32).withValues(alpha: 0.45)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.check_circle_rounded, color: Color(0xFF2E7D32)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Папка игры определена:\n${controller.installPath}',
+                style: TextStyle(
+                  color: textPrimary,
+                  fontSize: 12.5,
+                  height: 1.35,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: scheme.error.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.error.withValues(alpha: 0.30)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.info_outline_rounded, color: scheme.error, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Путь к игре не найден. Запустите игру один раз через '
+                  'официальный ярлык для автоопределения, либо укажите папку вручную.',
+                  style: TextStyle(
+                    color: textPrimary,
+                    fontSize: 12.5,
+                    height: 1.35,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (controller.isWaitingForGameProcess) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: scheme.primary,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Ожидание запуска игры (Reverse1999.exe)...',
+                    style: TextStyle(
+                      color: textSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -794,7 +1049,13 @@ class _MainScreenState extends State<MainScreen> {
                   tooltip: 'Найти игру автоматически',
                 ),
                 IconButton(
-                  onPressed: controller.selectInstallPath,
+                  onPressed: () async {
+                    await controller.selectInstallPath();
+                    if (!mounted) return;
+                    if (controller.lastUserError != null) {
+                      await _showInstallErrorDialog(controller.lastUserError!);
+                    }
+                  },
                   icon: Icon(
                     Icons.folder_open_rounded,
                     color: Theme.of(context).textTheme.bodySmall?.color,
@@ -803,6 +1064,12 @@ class _MainScreenState extends State<MainScreen> {
                 ),
               ],
             ),
+            if (!controller.isInstallPathValid ||
+                controller.isWaitingForGameProcess ||
+                controller.gamePathJustDetected) ...[
+              const SizedBox(height: 10),
+              _buildGamePathOnboardingBanner(controller),
+            ],
           ],
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 10),
