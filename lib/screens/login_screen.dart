@@ -130,11 +130,13 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
       setState(() {
         _errorMessage = e.message;
-        // The backend only rejects the login when the user isn't subscribed
-        // to the required channel — surface a join-channel hint in that case
-        // (but not for a user-triggered cancel or a plain timeout).
-        _showJoinChannelHint =
-            !e.message.contains('отменён') && !e.message.contains('истекло');
+        // Подсказка про канал — только когда отказ похож на отсутствие подписки,
+        // а не на сеть / таймаут / отмену.
+        final msg = e.message.toLowerCase();
+        _showJoinChannelHint = msg.contains('подпис') ||
+            msg.contains('канал') ||
+            msg.contains('не состоит') ||
+            msg.contains('не удалось подтвердить');
       });
     } catch (e) {
       if (!mounted) return;
@@ -239,6 +241,47 @@ class _LoginScreenState extends State<LoginScreen> {
                           'Войдите через Telegram, чтобы продолжить работу с лаунчером',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: Colors.white70, fontSize: 13),
+                        ),
+                        const SizedBox(height: 12),
+                        // Подсказка про VPN: сервер авторизации иногда
+                        // недоступен из‑за маршрутизации/блокировок.
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.06),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.12),
+                            ),
+                          ),
+                          child: const Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Padding(
+                                padding: EdgeInsets.only(top: 1),
+                                child: Icon(
+                                  Icons.vpn_lock_rounded,
+                                  size: 16,
+                                  color: Colors.white54,
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Если вход не работает — попробуйте включить VPN '
+                                  'или, наоборот, отключить его и повторить попытку.',
+                                  style: TextStyle(
+                                    color: Colors.white54,
+                                    fontSize: 11.5,
+                                    height: 1.35,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                         const SizedBox(height: 24),
                         ElevatedButton.icon(

@@ -18,7 +18,9 @@ import java.io.InputStreamReader
 class MainActivity : FlutterActivity() {
     private val channelName = "com.example.re_1999_solidleaf/shizuku"
     private val REQUEST_SHIZUKU = 1001
-    private val SERVICE_BIND_TIMEOUT_MS = 10000L
+    private val SERVICE_BIND_TIMEOUT_MS = 6500L
+    private val SERVICE_BIND_RETRY_DELAY_MS = 1500L
+    private val SERVICE_BIND_MAX_ATTEMPTS = 3
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -28,6 +30,8 @@ class MainActivity : FlutterActivity() {
     private var fileService: IFileTransferService? = null
     private var pendingServiceResult: MethodChannel.Result? = null
     private var pendingServiceTimeout: Runnable? = null
+    private var pendingServiceRetry: Runnable? = null
+    private var serviceBindAttempt = 0
 
     private val userServiceArgs: Shizuku.UserServiceArgs by lazy {
         Shizuku.UserServiceArgs(ComponentName(packageName, FileTransferUserService::class.java.name))
@@ -44,11 +48,34 @@ class MainActivity : FlutterActivity() {
             } else {
                 null
             }
-            completePendingServiceResult(fileService != null, null)
+            if (fileService != null) {
+                completePendingServiceResult(true, null)
+            } else {
+                handleFileServiceBindFailure(
+                    "Shizuku user service returned an inactive binder " +
+                        "(attempt $serviceBindAttempt/$SERVICE_BIND_MAX_ATTEMPTS)"
+                )
+            }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
             fileService = null
+        }
+
+        override fun onBindingDied(name: ComponentName?) {
+            fileService = null
+            handleFileServiceBindFailure(
+                "Shizuku user service binding died " +
+                    "(attempt $serviceBindAttempt/$SERVICE_BIND_MAX_ATTEMPTS)"
+            )
+        }
+
+        override fun onNullBinding(name: ComponentName?) {
+            fileService = null
+            handleFileServiceBindFailure(
+                "Shizuku user service returned null binder " +
+                    "(attempt $serviceBindAttempt/$SERVICE_BIND_MAX_ATTEMPTS)"
+            )
         }
     }
 
@@ -58,10 +85,13 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler { call, result ->
             when (call.method) {
                 "checkShizukuStatus" -> {
-                    result.success(isShizukuAvailable())
+                    result.success(getShizukuState().isReady)
+                }
+                "getShizukuState" -> {
+                    result.success(getShizukuState().toMap())
                 }
                 "checkPermission" -> {
-                    result.success(checkShizukuPermission())
+                    result.success(getShizukuState().hasPermission)
                 }
                 "requestPermission" -> {
                     requestShizukuPermission()
@@ -168,8 +198,11 @@ class MainActivity : FlutterActivity() {
     private fun completePendingServiceResult(success: Boolean, error: String?) {
         pendingServiceTimeout?.let { mainHandler.removeCallbacks(it) }
         pendingServiceTimeout = null
+        pendingServiceRetry?.let { mainHandler.removeCallbacks(it) }
+        pendingServiceRetry = null
         val pending = pendingServiceResult ?: return
         pendingServiceResult = null
+        serviceBindAttempt = 0
         if (error != null) {
             pending.error("SERVICE_BIND_FAILED", error, null)
         } else {
@@ -184,49 +217,146 @@ class MainActivity : FlutterActivity() {
             return
         }
 
-        if (!isShizukuAvailable()) {
-            result.error("SHIZUKU_NOT_AVAILABLE", "Shizuku app is not installed or not running", null)
+        if (pendingServiceResult != null) {
+            result.error("SERVICE_BIND_IN_PROGRESS", "Shizuku file service is already connecting", null)
             return
         }
-        if (!checkShizukuPermission()) {
+
+        val state = getShizukuState()
+        if (!state.installed) {
+            result.error("SHIZUKU_NOT_INSTALLED", "Shizuku не установлен", null)
+            return
+        }
+        if (!state.binderAlive) {
+            result.error("SHIZUKU_NOT_RUNNING", "Shizuku не запущен. Откройте Shizuku и нажмите Start.", null)
+            return
+        }
+        if (!state.hasPermission) {
             result.error("SHIZUKU_PERMISSION_DENIED", "Shizuku permission is not granted", null)
             return
         }
 
         pendingServiceResult = result
-        val timeout = Runnable {
-            if (pendingServiceResult === result) {
-                pendingServiceResult = null
-                result.error("SERVICE_TIMEOUT", "Shizuku user service did not connect in time", null)
+        serviceBindAttempt = 0
+        startFileServiceBindAttempt()
+    }
+
+    private fun startFileServiceBindAttempt() {
+        val pending = pendingServiceResult ?: return
+        serviceBindAttempt += 1
+        val attempt = serviceBindAttempt
+
+        pendingServiceTimeout?.let { mainHandler.removeCallbacks(it) }
+        pendingServiceRetry?.let { mainHandler.removeCallbacks(it) }
+
+        pendingServiceTimeout = Runnable {
+            if (pendingServiceResult === pending && serviceBindAttempt == attempt) {
+                handleFileServiceBindFailure(
+                    "Shizuku user service did not connect in time " +
+                        "(attempt $attempt/$SERVICE_BIND_MAX_ATTEMPTS)"
+                )
             }
         }
-        pendingServiceTimeout = timeout
-        mainHandler.postDelayed(timeout, SERVICE_BIND_TIMEOUT_MS)
+        mainHandler.postDelayed(pendingServiceTimeout!!, SERVICE_BIND_TIMEOUT_MS)
+
+        try {
+            Shizuku.unbindUserService(userServiceArgs, fileServiceConnection, true)
+        } catch (_: Exception) {
+        }
 
         try {
             Shizuku.bindUserService(userServiceArgs, fileServiceConnection)
         } catch (e: Exception) {
-            completePendingServiceResult(false, e.message ?: "bindUserService failed")
+            handleFileServiceBindFailure(
+                e.message ?: "bindUserService failed (attempt $attempt/$SERVICE_BIND_MAX_ATTEMPTS)"
+            )
         }
     }
 
-    private fun isShizukuAvailable(): Boolean {
-        return try {
+    private fun handleFileServiceBindFailure(reason: String) {
+        val pending = pendingServiceResult ?: return
+        pendingServiceTimeout?.let { mainHandler.removeCallbacks(it) }
+        pendingServiceTimeout = null
+
+        if (serviceBindAttempt < SERVICE_BIND_MAX_ATTEMPTS) {
+            pendingServiceRetry = Runnable {
+                if (pendingServiceResult === pending) {
+                    val state = getShizukuState()
+                    if (!state.isReady) {
+                        completePendingServiceResult(false, "Shizuku не готов: ${state.humanStatus}")
+                        return@Runnable
+                    }
+                    startFileServiceBindAttempt()
+                }
+            }
+            mainHandler.postDelayed(pendingServiceRetry!!, SERVICE_BIND_RETRY_DELAY_MS)
+            return
+        }
+
+        completePendingServiceResult(
+            false,
+            "$reason. Проверьте, что Shizuku запущен и разрешение выдано. " +
+                "На некоторых HyperOS/MIUI помогает перезапуск Shizuku."
+        )
+    }
+
+    private data class ShizukuState(
+        val installed: Boolean,
+        val binderAlive: Boolean,
+        val hasPermission: Boolean
+    ) {
+        val isReady: Boolean
+            get() = installed && binderAlive && hasPermission
+
+        val humanStatus: String
+            get() = when {
+                !installed -> "Shizuku не установлен"
+                !binderAlive -> "Shizuku не запущен"
+                !hasPermission -> "Нет разрешения Shizuku"
+                else -> "Shizuku активен"
+            }
+
+        fun toMap(): Map<String, Any> {
+            return mapOf(
+                "installed" to installed,
+                "binderAlive" to binderAlive,
+                "hasPermission" to hasPermission,
+                "active" to isReady,
+                "status" to humanStatus
+            )
+        }
+    }
+
+    private fun getShizukuState(): ShizukuState {
+        val installed = try {
             packageManager.getPackageInfo("moe.shizuku.privileged.api", PackageManager.GET_META_DATA)
-            Shizuku.pingBinder()
+            true
         } catch (_: Exception) {
             false
         }
-    }
 
-    private fun checkShizukuPermission(): Boolean {
-        return try {
-            if (!Shizuku.pingBinder()) return false
-            if (Shizuku.isPreV11()) return false
-            Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
-        } catch (_: Exception) {
+        val binderAlive = if (installed) {
+            try {
+                Shizuku.pingBinder()
+            } catch (_: Exception) {
+                false
+            }
+        } else {
             false
         }
+
+        val hasPermission = if (binderAlive) {
+            try {
+                !Shizuku.isPreV11() &&
+                    Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+            } catch (_: Exception) {
+                false
+            }
+        } else {
+            false
+        }
+
+        return ShizukuState(installed, binderAlive, hasPermission)
     }
 
     private fun requestShizukuPermission() {

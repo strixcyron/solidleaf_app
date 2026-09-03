@@ -46,7 +46,14 @@ class _AuthStatus {
 ///    to fetch the protected archive and saves it to a temporary file.
 class TelegramAuthService {
   TelegramAuthService({Dio? dio, FlutterSecureStorage? secureStorage})
-    : _dio = dio ?? Dio(),
+    : _dio =
+          dio ??
+          Dio(
+            BaseOptions(
+              connectTimeout: const Duration(seconds: 10),
+              receiveTimeout: const Duration(seconds: 30),
+            ),
+          ),
       _secureStorage = secureStorage ?? const FlutterSecureStorage();
 
   final Dio _dio;
@@ -144,9 +151,14 @@ class TelegramAuthService {
   }
 
   Future<String> _requestSessionId() async {
+    final url = '${TelegramAuthConfig.baseUrl}/auth/generate';
     try {
       final response = await _dio.post<Map<String, dynamic>>(
-        '${TelegramAuthConfig.baseUrl}/auth/generate',
+        url,
+        options: Options(
+          sendTimeout: const Duration(seconds: 10),
+          receiveTimeout: const Duration(seconds: 15),
+        ),
       );
       final sessionId = response.data?['session_id']?.toString();
       if (sessionId == null || sessionId.isEmpty) {
@@ -154,6 +166,17 @@ class TelegramAuthService {
       }
       return sessionId;
     } on DioException catch (e) {
+      final kind = e.type;
+      if (kind == DioExceptionType.connectionTimeout ||
+          kind == DioExceptionType.receiveTimeout ||
+          kind == DioExceptionType.sendTimeout ||
+          kind == DioExceptionType.connectionError) {
+        throw TelegramAuthException(
+          'Сервер авторизации недоступен (${TelegramAuthConfig.baseUrl}). '
+          'Попробуйте включить VPN или отключить его, затем повторите вход. '
+          'Если не поможет — проверьте, что бэкенд запущен (порт 8000).',
+        );
+      }
       throw TelegramAuthException(
         'Не удалось создать сессию входа: ${e.message ?? e.toString()}',
       );
@@ -165,38 +188,56 @@ class TelegramAuthService {
     final webLink = Uri.parse(
       'https://t.me/${TelegramAuthConfig.botUsername}?start=$encodedSession',
     );
-
-    // On Android/iOS the universal https://t.me/<bot>?start=... link is the
-    // most reliable way to hand off to Telegram. The custom tg:// scheme can
-    // silently fail depending on OS/app state or when Telegram is not the
-    // default handler, leaving the user stuck in the app. We prefer the web
-    // link first and only try the deep link as a fallback.
-    final webOpened = await launchUrl(
-      webLink,
-      mode: LaunchMode.externalApplication,
-    );
-    if (webOpened) {
-      return;
-    }
-
-    if (!Platform.isAndroid && !Platform.isIOS) {
-      throw TelegramAuthException(
-        'Не удалось открыть Telegram. Установите приложение или перейдите по ссылке вручную: $webLink',
-      );
-    }
-
     final deepLink = Uri.parse(
       'tg://resolve?domain=${TelegramAuthConfig.botUsername}&start=$encodedSession',
     );
-    final deepOpened = await launchUrl(
-      deepLink,
-      mode: LaunchMode.externalApplication,
-    );
 
-    if (!deepOpened) {
-      throw TelegramAuthException(
-        'Не удалось открыть Telegram. Установите приложение или перейдите по ссылке вручную: $webLink',
-      );
+    // Windows: url_launcher часто возвращает true, но окно не открывает.
+    // Надёжный путь — shell association (`start`), сначала tg:// к Desktop.
+    if (Platform.isWindows) {
+      if (await _tryWindowsShellOpen(deepLink)) return;
+      if (await _tryWindowsShellOpen(webLink)) return;
+      if (await _tryLaunchUrl(deepLink)) return;
+      if (await _tryLaunchUrl(webLink)) return;
+    } else if (Platform.isAndroid || Platform.isIOS) {
+      // Mobile: https://t.me надёжнее, tg:// часто молча падает.
+      if (await _tryLaunchUrl(webLink)) return;
+      if (await _tryLaunchUrl(deepLink)) return;
+    } else {
+      if (await _tryLaunchUrl(deepLink)) return;
+      if (await _tryLaunchUrl(webLink)) return;
+    }
+
+    throw TelegramAuthException(
+      'Не удалось открыть Telegram. Установите приложение или перейдите по '
+      'ссылке вручную: $webLink',
+    );
+  }
+
+  Future<bool> _tryLaunchUrl(Uri uri) async {
+    try {
+      return await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Открывает URI через Windows URL protocol handler.
+  ///
+  /// Не используем голый `cmd /c start <url>`: `&` в query (`?start=<uuid>`)
+  /// cmd считает разделителем команд и пытается запустить uuid как exe —
+  /// отсюда диалог «Не удается найти <uuid>».
+  Future<bool> _tryWindowsShellOpen(Uri uri) async {
+    final url = uri.toString();
+    try {
+      // Стандартный обработчик протоколов Windows (tg://, https://).
+      final result = await Process.run('rundll32', [
+        'url.dll,FileProtocolHandler',
+        url,
+      ]);
+      return result.exitCode == 0;
+    } catch (_) {
+      return false;
     }
   }
 

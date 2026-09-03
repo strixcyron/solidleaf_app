@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
@@ -56,6 +56,7 @@ class LauncherController extends ChangeNotifier {
   double uiScale = 1.0;
 
   bool isDownloading = false;
+
   /// Какой компонент сейчас качается: `text`, `art` или `null`.
   String? downloadingKind;
   bool hasUpdate = false;
@@ -95,7 +96,8 @@ class LauncherController extends ChangeNotifier {
     if (_looksLikeSemanticVersion(currentVersion)) {
       return currentVersion;
     }
-    if (currentVersion != 'v0.0.0' && _looksLikeSemanticVersion(remoteVersion)) {
+    if (currentVersion != 'v0.0.0' &&
+        _looksLikeSemanticVersion(remoteVersion)) {
       return remoteVersion;
     }
     return currentVersion;
@@ -185,7 +187,8 @@ class LauncherController extends ChangeNotifier {
           'Shizuku не активен — откат премиум-файлов отложен. '
           'Откройте Shizuku и повторите вход, чтобы завершить откат.',
         );
-        statusText = 'Подписка истекла. Нужен Shizuku для отката премиум-файлов.';
+        statusText =
+            'Подписка истекла. Нужен Shizuku для отката премиум-файлов.';
         notifyListeners();
         return;
       }
@@ -243,7 +246,8 @@ class LauncherController extends ChangeNotifier {
       hasArtUpdate = false;
       lastBackupFiles = [];
       lastBackupKind = null;
-      statusText = 'Подписка истекла. Оставлена базовая Free-версия локализации';
+      statusText =
+          'Подписка истекла. Оставлена базовая Free-версия локализации';
       addLog('Откат к Free завершён. Возвращено файлов: $reverted.');
       notifyListeners();
     } catch (e) {
@@ -273,9 +277,8 @@ class LauncherController extends ChangeNotifier {
   ) async {
     final candidates = <String>{};
 
-    for (final rel in (Platform.isWindows
-        ? _backupFilesWindows
-        : _backupFilesAndroid)) {
+    for (final rel
+        in (Platform.isWindows ? _backupFilesWindows : _backupFilesAndroid)) {
       candidates.add(rel.replaceAll('\\', '/'));
     }
 
@@ -359,10 +362,7 @@ class LauncherController extends ChangeNotifier {
         'Authorization': 'Bearer ${GitHubConfig.premiumToken}',
       };
     }
-    return {
-      'Accept': '*/*',
-      'User-Agent': 'solidleaf-launcher-app',
-    };
+    return {'Accept': '*/*', 'User-Agent': 'solidleaf-launcher-app'};
   }
 
   /// Возвращает URL для скачивания ассета релиза. Для премиум (приватного)
@@ -391,7 +391,10 @@ class LauncherController extends ChangeNotifier {
     animationsEnabled = prefs.getBool('animations_enabled') ?? true;
     dynamicColorEnabled = prefs.getBool('dynamic_color') ?? false;
     animatedCoverEnabled = prefs.getBool('animated_cover') ?? false;
-    animatedCoverIndex = (prefs.getInt('animated_cover_index') ?? 0).clamp(0, 6);
+    animatedCoverIndex = (prefs.getInt('animated_cover_index') ?? 0).clamp(
+      0,
+      6,
+    );
     final presetName = prefs.getString('theme_preset');
     themePreset = AppThemePreset.values.firstWhere(
       (e) => e.name == presetName,
@@ -419,7 +422,9 @@ class LauncherController extends ChangeNotifier {
     debugPrint('[GitHubConfig] ${GitHubConfig.debugState}');
     await refreshPremiumStatus();
     if (_usesAuthBackendForPremium) {
-      addLog('Премиум-релизы: auth-backend (JWT), без GITHUB_TOKEN в приложении');
+      addLog(
+        'Премиум-релизы: auth-backend (JWT), без GITHUB_TOKEN в приложении',
+      );
     } else {
       addLog('GitHub token — ${GitHubConfig.debugState}');
     }
@@ -597,7 +602,7 @@ class LauncherController extends ChangeNotifier {
 
   Future<void> _ensureFileService({int attempts = 4}) async {
     const methodChannel = MethodChannel(shizukuChannel);
-    Object? lastError;
+    String? lastErrorMessage;
 
     for (var attempt = 1; attempt <= attempts; attempt++) {
       try {
@@ -612,13 +617,13 @@ class LauncherController extends ChangeNotifier {
           }
           return;
         }
-        lastError = Exception('Не удалось подключить Shizuku file service');
+        lastErrorMessage = 'Не удалось подключить Shizuku file service';
       } on PlatformException catch (e) {
         final message =
             'Shizuku file service недоступен: ${e.message ?? e.code}';
-        lastError = Exception(message);
+        lastErrorMessage = message;
       } catch (e) {
-        lastError = e;
+        lastErrorMessage = e.toString();
       }
 
       if (attempt < attempts) {
@@ -633,7 +638,7 @@ class LauncherController extends ChangeNotifier {
     statusText = message;
     addLog(message);
     notifyListeners();
-    throw Exception(lastError?.toString() ?? message);
+    throw Exception(lastErrorMessage ?? message);
   }
 
   Future<bool> _fsMkdirs(String targetPath) async {
@@ -1133,8 +1138,9 @@ class LauncherController extends ChangeNotifier {
       );
 
       final status = response.statusCode ?? 0;
-      final sentAuth =
-          response.requestOptions.headers.containsKey('Authorization');
+      final sentAuth = response.requestOptions.headers.containsKey(
+        'Authorization',
+      );
       final ghMessage = response.data is Map
           ? (response.data as Map)['message']?.toString()
           : null;
@@ -1229,7 +1235,9 @@ class LauncherController extends ChangeNotifier {
   ) {
     for (final asset in assets) {
       final name = (asset['name'] ?? '').toString().toLowerCase();
-      final url = (asset['browser_download_url'] ?? '').toString().toLowerCase();
+      final url = (asset['browser_download_url'] ?? '')
+          .toString()
+          .toLowerCase();
       if (test(name, url)) return asset;
     }
     return null;
@@ -1256,7 +1264,6 @@ class LauncherController extends ChangeNotifier {
           name.endsWith('_${platformKey}_free.zip'),
     );
   }
-
 
   /// Premium art packs: `*_pc_art.zip` / `*_android_art.zip`.
   Map<String, dynamic>? _pickArtAsset(List<Map<String, dynamic>> assets) {
@@ -1313,7 +1320,9 @@ class LauncherController extends ChangeNotifier {
 
       if (zipAsset == null) {
         hasUpdate = false;
-        final names = assets.map((a) => (a['name'] ?? '').toString()).join(', ');
+        final names = assets
+            .map((a) => (a['name'] ?? '').toString())
+            .join(', ');
         statusText = 'Архив текста для вашей платформы не найден в релизе';
         addLog(statusText);
         addLog('Файлы в релизе: ${names.isEmpty ? '(пусто)' : names}');
@@ -1381,7 +1390,6 @@ class LauncherController extends ChangeNotifier {
       addLog('Не удалось проверить версию текстур: $e');
     }
   }
-
 
   Future<void> selectInstallPath() async {
     final selected = await FilePicker.platform.getDirectoryPath(
@@ -1575,7 +1583,6 @@ class LauncherController extends ChangeNotifier {
     }
   }
 
-
   /// Скачивание премиум-архива через auth-backend (Android без GITHUB_TOKEN).
   Future<void> _downloadAndInstallViaBackend({required String kind}) async {
     final assetKind = kind == 'art' ? 'art' : 'full';
@@ -1658,9 +1665,7 @@ class LauncherController extends ChangeNotifier {
     final zipUrl = _resolveAssetDownloadUrl(asset);
     if (zipUrl == null || zipUrl.isEmpty) {
       _failInstall(
-        PatchInstallException(
-          'Не удалось найти zip-архив в GitHub Releases',
-        ),
+        PatchInstallException('Не удалось найти zip-архив в GitHub Releases'),
       );
       return;
     }
@@ -1999,9 +2004,9 @@ class LauncherController extends ChangeNotifier {
         final sourceDirectory = extractedDir;
         final allFiles = sourceDirectory.existsSync()
             ? sourceDirectory
-                .listSync(recursive: true)
-                .whereType<File>()
-                .toList()
+                  .listSync(recursive: true)
+                  .whereType<File>()
+                  .toList()
             : <File>[];
 
         final backupDirPath = _backupFolderName();
@@ -2056,8 +2061,8 @@ class LauncherController extends ChangeNotifier {
                   Exception('Не удалось записать файлы в папку игры'),
               pathHint: targetDir,
             ),
-            needsAdmin: firstWriteError != null &&
-                isAccessDeniedError(firstWriteError),
+            needsAdmin:
+                firstWriteError != null && isAccessDeniedError(firstWriteError),
           );
         }
 
@@ -2096,15 +2101,31 @@ class LauncherController extends ChangeNotifier {
   Future<bool> checkShizukuStatus() async {
     try {
       const methodChannel = MethodChannel(shizukuChannel);
-      final result =
-          await methodChannel.invokeMethod<bool>('checkShizukuStatus') ?? false;
-      isShizukuActive = result;
-      statusText = result ? 'Shizuku активен' : 'Shizuku не активен';
-      addLog(result ? 'Shizuku доступен' : 'Shizuku недоступен');
+      final state = await methodChannel.invokeMethod<dynamic>(
+        'getShizukuState',
+      );
+      bool active;
+      String status;
+      if (state is Map) {
+        active = (state['active'] as bool?) ?? false;
+        status =
+            state['status']?.toString() ??
+            (active ? 'Shizuku активен' : 'Shizuku не активен');
+      } else {
+        active =
+            await methodChannel.invokeMethod<bool>('checkShizukuStatus') ??
+            false;
+        status = active ? 'Shizuku активен' : 'Shizuku не активен';
+      }
+
+      isShizukuActive = active;
+      statusText = status;
+      addLog(status);
       notifyListeners();
-      return result;
+      return active;
     } on PlatformException catch (error) {
       isShizukuActive = false;
+      statusText = 'Shizuku не активен';
       addLog(
         'Проверка Shizuku завершилась ошибкой: ${error.message ?? 'unknown'}',
       );
@@ -2155,17 +2176,20 @@ class LauncherController extends ChangeNotifier {
     } else if (exception.type == DioExceptionType.connectionError) {
       message = 'Нет интернет-соединения или сервер недоступен.';
     } else if (exception.response?.statusCode == 401) {
-      message = 'GitHub отклонил запрос. Повторите проверку без лишнего токена.';
+      message =
+          'GitHub отклонил запрос. Повторите проверку без лишнего токена.';
     } else if (exception.response?.statusCode == 403) {
       message = 'GitHub API ограничил число запросов. Попробуйте позже.';
     } else if (exception.response?.statusCode == 404) {
-      final sentAuth =
-          exception.requestOptions.headers.containsKey('Authorization');
+      final sentAuth = exception.requestOptions.headers.containsKey(
+        'Authorization',
+      );
       final ghMessage = exception.response?.data is Map
           ? (exception.response!.data as Map)['message']?.toString()
           : null;
       final path = exception.requestOptions.uri.path;
-      final isAssetDownload = path.contains('/releases/assets/') ||
+      final isAssetDownload =
+          path.contains('/releases/assets/') ||
           path.contains('/releases/download/');
       if (isPremium && isAssetDownload) {
         message =
@@ -2173,7 +2197,8 @@ class LauncherController extends ChangeNotifier {
             'GitHub: "${ghMessage ?? "Not Found"}", auth=$sentAuth. '
             '[${GitHubConfig.debugState}]';
       } else if (isPremium) {
-        message = 'Премиум-релиз в $_activeReleaseRepoLabel недоступен (404). '
+        message =
+            'Премиум-релиз в $_activeReleaseRepoLabel недоступен (404). '
             'GitHub: "${ghMessage ?? "Not Found"}", auth=$sentAuth. '
             '[${GitHubConfig.debugState}]';
       } else {
