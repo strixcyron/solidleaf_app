@@ -526,84 +526,137 @@ class _MainScreenState extends State<MainScreen>
 
   Future<void> _showInstallChoiceDialog(LauncherController controller) async {
     if (!mounted) return;
-    final choice = await showDialog<String?>(
+
+    final textInstalled = controller.isTextInstalled;
+    final artInstalled = controller.isTexturesInstalled;
+    // Уже стоящие и актуальные компоненты в диалоге недоступны.
+    final textLocked = textInstalled && !controller.hasTextUpdate;
+    final artLocked = artInstalled && !controller.hasTexturesUpdate;
+    final artPremiumLocked = !controller.isPremium;
+
+    var pickText = !textLocked;
+    var pickArt = !artLocked && !artPremiumLocked;
+
+    final choice = await showDialog<({bool text, bool art})?>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Theme.of(context).cardColor,
-        title: Text(
-          'Выбор установки',
-          style: TextStyle(
-            color: Theme.of(context).textTheme.bodyMedium?.color,
-          ),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Выберите, что вы хотите установить:',
-              style: TextStyle(
-                color: Theme.of(context).textTheme.bodyMedium?.color,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            return AlertDialog(
+              backgroundColor: Theme.of(context).cardColor,
+              title: Text(
+                controller.isNothingInstalled
+                    ? 'Выбор установки'
+                    : 'Доустановка компонентов',
+                style: TextStyle(
+                  color: Theme.of(context).textTheme.bodyMedium?.color,
+                ),
               ),
-            ),
-            const SizedBox(height: 12),
-            ElevatedButton(
-              onPressed: () => Navigator.of(ctx).pop('text'),
-              child: const Text('Русификация текста'),
-            ),
-            const SizedBox(height: 8),
-            ElevatedButton(
-              onPressed: () => Navigator.of(ctx).pop('art'),
-              child: const Text('Русификация текстур'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(null),
-            child: const Text('Отмена'),
-          ),
-        ],
-      ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    controller.isNothingInstalled
+                        ? 'Выберите, что установить:'
+                        : 'Отметьте компоненты, которые ещё нужно поставить:',
+                    style: TextStyle(
+                      color: Theme.of(context).textTheme.bodyMedium?.color,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: pickText,
+                    onChanged: textLocked
+                        ? null
+                        : (v) => setLocal(() => pickText = v ?? false),
+                    title: Text(
+                      textLocked
+                          ? 'Текст (уже установлено)'
+                          : 'Русификация текста',
+                    ),
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: pickArt && !artPremiumLocked,
+                    onChanged: (artLocked || artPremiumLocked)
+                        ? null
+                        : (v) => setLocal(() => pickArt = v ?? false),
+                    title: Text(
+                      artPremiumLocked
+                          ? 'Текстуры (нужен Premium)'
+                          : artLocked
+                              ? 'Текстуры (уже установлено)'
+                              : 'Графика и текстуры',
+                    ),
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                  if (!textLocked && !artLocked && !artPremiumLocked)
+                    TextButton(
+                      onPressed: () => setLocal(() {
+                        pickText = true;
+                        pickArt = true;
+                      }),
+                      child: const Text('Выбрать всё'),
+                    ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(null),
+                  child: const Text('Отмена'),
+                ),
+                FilledButton(
+                  onPressed: (!pickText && !(pickArt && !artPremiumLocked))
+                      ? null
+                      : () => Navigator.of(ctx).pop((
+                            text: pickText,
+                            art: pickArt && !artPremiumLocked,
+                          )),
+                  child: const Text('Установить'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
 
-    if (!mounted) return;
-    if (choice == null) return;
+    if (!mounted || choice == null) return;
 
-    if (choice == 'text') {
+    if (choice.text) {
       await _runInstallFlow();
-    } else if (choice == 'art') {
+      if (!mounted) return;
+      if (controller.lastUserError != null) return;
+    }
+    if (choice.art) {
       await _runArtInstallFlow();
     }
   }
 
-  /// True, если текст уже ставили (не «чистая» установка).
-  bool _isTextInstalled(LauncherController c) => c.currentVersion != 'v0.0.0';
-
-  /// True, если текстуры уже ставили.
-  bool _isArtInstalled(LauncherController c) => c.currentArtVersion != 'v0.0.0';
-
-  /// Главная кнопка: обновление без диалога, если стоят обе локализации;
-  /// диалог выбора — при установке или если стоит только одна из них.
+  /// Главная кнопка: приоритет «Обновить» для установленных с апдейтом,
+  /// иначе установка / доустановка через диалог.
   Future<void> _handlePrimaryAction(LauncherController controller) async {
-    final hasUpdates = controller.hasUpdate || controller.hasArtUpdate;
-    final bothInstalled =
-        _isTextInstalled(controller) && _isArtInstalled(controller);
-
-    if (hasUpdates && bothInstalled) {
+    if (controller.hasAnyComponentUpdate) {
       await _runBatchUpdate(controller);
       return;
     }
 
-    // Первичная установка или стоит только текст/только текстуры → выбор.
-    await _showInstallChoiceDialog(controller);
+    if (controller.isNothingInstalled || !controller.isAllInstalled) {
+      await _showInstallChoiceDialog(controller);
+      return;
+    }
+    // Всё установлено и актуально — кнопка disabled, сюда не попадаем.
   }
 
-  /// Обновляет все доступные компоненты подряд без диалога выбора.
+  /// Фоном обновляет только те УСТАНОВЛЕННЫЕ компоненты, где есть новая версия.
   Future<void> _runBatchUpdate(LauncherController controller) async {
     if (!mounted) return;
 
-    final needText = controller.hasUpdate;
-    final needArt = controller.hasArtUpdate && controller.isPremium;
+    final needText = controller.hasTextUpdate;
+    final needArt = controller.hasTexturesUpdate && controller.isPremium;
 
     if (needText) {
       await _runInstallFlow();
@@ -731,24 +784,31 @@ class _MainScreenState extends State<MainScreen>
       final pct = (controller.downloadProgress * 100).toStringAsFixed(0);
       return 'Загрузка $pct%';
     }
-    if (controller.hasUpdate || controller.hasArtUpdate) {
+    if (controller.hasAnyComponentUpdate) {
       return 'Обновить';
     }
-    if (controller.currentVersion == 'v0.0.0' ||
-        controller.currentArtVersion == 'v0.0.0') {
+    if (controller.isNothingInstalled) {
       return 'Установить';
+    }
+    if (!controller.isAllInstalled) {
+      if (controller.isTextInstalled && !controller.isTexturesInstalled) {
+        return controller.isPremium
+            ? 'Установить графику'
+            : 'Доустановить компоненты';
+      }
+      if (!controller.isTextInstalled && controller.isTexturesInstalled) {
+        return 'Установить текст';
+      }
+      return 'Доустановить компоненты';
     }
     return 'Установлено';
   }
 
   bool _primaryActionEnabled(LauncherController controller) {
     if (controller.isDownloading) return false;
-    // На Windows без валидного пути игру нельзя патчить.
     if (!Platform.isAndroid && !controller.isInstallPathValid) return false;
-    if (controller.hasUpdate || controller.hasArtUpdate) return true;
-    // Установка: ничего не стоит или стоит только одна локализация.
-    if (controller.currentVersion == 'v0.0.0' ||
-        controller.currentArtVersion == 'v0.0.0') {
+    if (controller.hasAnyComponentUpdate) return true;
+    if (controller.isNothingInstalled || !controller.isAllInstalled) {
       return true;
     }
     return false;
@@ -778,10 +838,11 @@ class _MainScreenState extends State<MainScreen>
               child: Builder(
                 builder: (context) {
                   final isUpdateAction = !controller.isDownloading &&
-                      (controller.hasUpdate || controller.hasArtUpdate);
+                      controller.hasAnyComponentUpdate;
                   final accent = isUpdateAction
                       ? _updateAccent
                       : Theme.of(context).colorScheme.primary;
+                  final enabled = _primaryActionEnabled(controller);
 
                   return MagneticHover(
                     child: ArcaneHoverBorder(
@@ -791,7 +852,8 @@ class _MainScreenState extends State<MainScreen>
                         curve: Curves.easeOut,
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(12),
-                          boxShadow: (highlightCta || isUpdateAction)
+                          boxShadow: enabled &&
+                                  (highlightCta || isUpdateAction)
                               ? [
                                   BoxShadow(
                                     color: accent.withValues(
@@ -806,14 +868,15 @@ class _MainScreenState extends State<MainScreen>
                         child: ElevatedButton.icon(
                           style: ElevatedButton.styleFrom(
                             backgroundColor: accent,
-                            disabledBackgroundColor: const Color(0xFF2E7D32)
-                                .withValues(alpha: 0.35),
+                            disabledBackgroundColor:
+                                Colors.grey.shade700.withValues(alpha: 0.45),
+                            disabledForegroundColor: Colors.white70,
                             padding: const EdgeInsets.symmetric(vertical: 16),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
                             ),
                           ),
-                          onPressed: _primaryActionEnabled(controller)
+                          onPressed: enabled
                               ? () => _handlePrimaryAction(controller)
                               : null,
                           icon: Icon(

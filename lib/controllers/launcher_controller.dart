@@ -111,6 +111,26 @@ class LauncherController extends ChangeNotifier {
   final TelegramAuthService telegramAuth = TelegramAuthService();
   bool isPremium = false;
 
+  /// Текст уже установлен (не «чистая» v0.0.0).
+  bool get isTextInstalled => currentVersion != 'v0.0.0';
+
+  /// Текстуры уже установлены.
+  bool get isTexturesInstalled => currentArtVersion != 'v0.0.0';
+
+  /// Обновление текста: компонент стоит и remote новее local.
+  bool get hasTextUpdate => isTextInstalled && hasUpdate;
+
+  /// Обновление текстур: компонент стоит и remote новее local.
+  bool get hasTexturesUpdate => isTexturesInstalled && hasArtUpdate;
+
+  bool get hasAnyComponentUpdate => hasTextUpdate || hasTexturesUpdate;
+
+  bool get isNothingInstalled => !isTextInstalled && !isTexturesInstalled;
+
+  /// Для free-аккаунта «всё» = только текст; текстуры требуют Premium.
+  bool get isAllInstalled =>
+      isPremium ? (isTextInstalled && isTexturesInstalled) : isTextInstalled;
+
   /// Re-reads the locally stored Telegram access tier and updates
   /// [isPremium]. Call this after [initialize], and again after any
   /// login/logout attempt (including the 401-triggered auto-logout inside
