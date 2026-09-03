@@ -1,45 +1,38 @@
-import 'dart:io';
-
-/// Centralized configuration for the Telegram authentication backend
-/// (FastAPI service + Telegram bot) used to unlock premium texture
-/// downloads.
+/// Централизованная конфигурация Telegram auth-backend
+/// (FastAPI + бот), через который лаунчер получает JWT и премиум-загрузки.
 ///
-/// Edit the values below to point the launcher at your deployment.
+/// Секреты (GITHUB_TOKEN, JWT_SECRET, DATABASE_URL) живут только на сервере.
+/// Клиент знает лишь публичный адрес API.
 class TelegramAuthConfig {
   TelegramAuthConfig._();
 
-  /// Telegram bot username WITHOUT the leading `@`.
-  /// Used to build the deep link `tg://resolve?domain=...&start=...`.
+  /// Имя Telegram-бота без ведущего `@`.
+  /// Используется для deep link `tg://resolve?domain=...&start=...`.
   static const String botUsername = 'SolidLeaf_Auth_Bot';
 
-  /// Base URL of the FastAPI backend that issues session ids, JWT tokens and
-  /// serves the protected texture download endpoint.
+  /// Адрес production-бэкенда на VPS (по умолчанию).
+  static const String defaultBackendUrl = 'http://138.124.241.69:8000';
+
+  /// Base URL FastAPI-бэкенда.
   ///
-  /// Resolved automatically based on platform.
+  /// Приоритет:
+  /// 1. `--dart-define=APP_BACKEND_URL=...` (или dart_defines.local.json)
+  /// 2. [defaultBackendUrl] — VPS production
   ///
-  /// `10.0.2.2` only works in the Android emulator. On a real phone the app
-  /// must connect to the PC's LAN IP (for example 192.168.31.58), otherwise
-  /// the `/auth/generate` request times out before the Telegram login flow can
-  /// even start. You can override it at build time with
-  /// `--dart-define=APP_BACKEND_URL=http://192.168.31.58:8000`.
+  /// Пример локальной переопределения при разработке:
+  /// `--dart-define=APP_BACKEND_URL=http://127.0.0.1:8000`
   static String get baseUrl {
     const override = String.fromEnvironment('APP_BACKEND_URL', defaultValue: '');
     if (override.isNotEmpty) {
       return override;
     }
-
-    if (Platform.isAndroid) {
-      // Real device fallback: use the host PC LAN IP on the same Wi‑Fi network.
-      return 'http://192.168.31.58:8000';
-    }
-    return 'http://localhost:8000';
+    return defaultBackendUrl;
   }
 
-  /// How often (in seconds) the client polls `/auth/status` while waiting
-  /// for the user to confirm the login inside Telegram.
+  /// Интервал опроса `/auth/status` (секунды), пока пользователь
+  /// подтверждает вход в Telegram.
   static const int pollIntervalSeconds = 3;
 
-  /// Maximum time (in seconds) to wait for a successful login before giving
-  /// up and reporting a timeout error.
+  /// Таймаут ожидания успешного входа (секунды).
   static const int pollTimeoutSeconds = 120;
 }
