@@ -21,6 +21,7 @@ import '../widgets/effects/rain_glass_overlay.dart';
 import '../widgets/effects/staggered_fade_in.dart';
 import '../widgets/launcher_version_badge.dart';
 import '../widgets/mini_player.dart';
+import '../widgets/welcome_dialog.dart';
 import 'about_project_page.dart';
 import 'settings_page.dart';
 import 'gift_codes_page.dart';
@@ -58,6 +59,7 @@ class _MainScreenState extends State<MainScreen>
     with WindowListener, WidgetsBindingObserver {
   final ScrollController _mainScrollController = ScrollController();
   bool _ctaHighlight = false;
+  bool _welcomeHandled = false;
   LauncherController? _controller;
 
   @override
@@ -69,8 +71,32 @@ class _MainScreenState extends State<MainScreen>
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      context.read<LauncherController>().initialize();
+      _bootstrapMainScreen();
     });
+  }
+
+  /// Загрузка контроллера и Welcome-диалог при первом запуске.
+  Future<void> _bootstrapMainScreen() async {
+    final controller = context.read<LauncherController>();
+    try {
+      await controller.initialize();
+    } catch (_) {
+      // Welcome всё равно показываем — экран уже нарисован.
+    }
+    if (!mounted) return;
+    await _maybeShowWelcome(controller);
+  }
+
+  Future<void> _maybeShowWelcome(LauncherController controller) async {
+    if (_welcomeHandled) return;
+    _welcomeHandled = true;
+    final firstLaunch = await controller.isFirstLaunch();
+    if (!firstLaunch || !mounted) return;
+    await showWelcomeOnboardingDialog(
+      context,
+      animate: controller.animationsEnabled,
+    );
+    await controller.markFirstLaunchSeen();
   }
 
   @override

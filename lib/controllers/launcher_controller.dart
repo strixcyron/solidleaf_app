@@ -441,6 +441,21 @@ class LauncherController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Ключ первого запуска: true, пока пользователь не закрыл Welcome-диалог.
+  static const firstLaunchPrefKey = 'is_first_launch';
+
+  /// true, если приветствие ещё не показывали (по умолчанию — первый запуск).
+  Future<bool> isFirstLaunch() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(firstLaunchPrefKey) ?? true;
+  }
+
+  /// Помечает Welcome-диалог как просмотренный.
+  Future<void> markFirstLaunchSeen() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(firstLaunchPrefKey, false);
+  }
+
   Future<void> toggleTheme() async {
     isDarkMode = !isDarkMode;
     final prefs = await SharedPreferences.getInstance();
