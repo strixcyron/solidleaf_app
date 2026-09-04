@@ -16,6 +16,8 @@ android {
     }
                                            
     compileOptions {
+        // Нужно для flutter_local_notifications (и Shizuku API на старых minSdk).
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -33,6 +35,7 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        multiDexEnabled = true
     }
 
     buildTypes {
@@ -59,6 +62,7 @@ flutter {
 }
 
 dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
     implementation("dev.rikka.shizuku:api:13.1.0")
     implementation("dev.rikka.shizuku:provider:13.1.0")
 }

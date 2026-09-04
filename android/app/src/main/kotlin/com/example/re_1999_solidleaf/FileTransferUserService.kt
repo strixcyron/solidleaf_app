@@ -1,7 +1,10 @@
 package com.example.re_1999_solidleaf
 
+import android.content.Context
+import android.system.Os
 import android.util.Log
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
 
@@ -14,14 +17,15 @@ import java.io.RandomAccessFile
  * another app's protected Android/data/<pkg> folder.
  *
  * Must have a public no-argument constructor (Shizuku instantiates it via
- * reflection in the new process).
+ * reflection in the new process). Shizuku v13+ may use the Context ctor first.
  */
-class FileTransferUserService : IFileTransferService.Stub() {
+class FileTransferUserService : IFileTransferService.Stub {
+    constructor() : super()
+    constructor(@Suppress("UNUSED_PARAMETER") context: Context) : super()
 
     override fun mkdirs(path: String): Boolean {
         return try {
-            val dir = File(path)
-            dir.exists() || dir.mkdirs()
+            ensureDirectory(File(path))
         } catch (e: Exception) {
             Log.w(TAG, "mkdirs failed: $path", e)
             false
@@ -31,22 +35,79 @@ class FileTransferUserService : IFileTransferService.Stub() {
     override fun writeChunk(path: String, data: ByteArray, append: Boolean): Boolean {
         try {
             val file = File(path)
-            file.parentFile?.mkdirs()
+            file.parentFile?.let { ensureDirectory(it) }
 
-            // HyperOS / MIUI / Honor: у существующих файлов игры иногда нельзя
-            // сделать O_TRUNC — удаляем или обнуляем перед первой записью.
+            // HyperOS / MIUI / Honor / Transsion: у существующих файлов игры
+            // иногда нельзя сделать O_TRUNC — удаляем или обнуляем.
             if (!append && file.exists()) {
                 prepareForOverwrite(file)
             }
 
-            FileOutputStream(path, append).use { it.write(data) }
-            return true
+            try {
+                writeViaStream(file, data, append)
+                return true
+            } catch (primary: Exception) {
+                if (append) {
+                    throw primary
+                }
+                // Запасной путь: tmp + rename — обходит блокировки truncate/open.
+                Log.w(TAG, "writeChunk primary failed, trying tmp+rename: $path", primary)
+                writeViaTempRename(file, data)
+                return true
+            }
         } catch (e: Exception) {
             Log.e(TAG, "writeChunk failed: $path append=$append", e)
-            // Пробрасываем текст ошибки на сторону Flutter (MainActivity → FS_ERROR).
             throw RuntimeException(
                 "writeChunk: ${e.javaClass.simpleName}: ${e.message ?: "unknown"} @ $path",
                 e,
+            )
+        }
+    }
+
+    private fun writeViaStream(file: File, data: ByteArray, append: Boolean) {
+        FileOutputStream(file, append).use { out ->
+            out.write(data)
+            try {
+                out.fd.sync()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun writeViaTempRename(file: File, data: ByteArray) {
+        val parent = file.parentFile ?: throw IllegalStateException("no parent for ${file.path}")
+        ensureDirectory(parent)
+        val tmp = File(parent, "${file.name}.solidleaf.tmp")
+        if (tmp.exists() && !tmp.delete()) {
+            prepareForOverwrite(tmp)
+            tmp.delete()
+        }
+        try {
+            writeViaStream(tmp, data, false)
+            if (file.exists()) {
+                prepareForOverwrite(file)
+            }
+            if (tmp.renameTo(file)) {
+                return
+            }
+            // renameTo может вернуть false на FUSE/exFAT — копируем вручную.
+            FileInputStream(tmp).use { input ->
+                FileOutputStream(file, false).use { output ->
+                    input.copyTo(output)
+                    try {
+                        output.fd.sync()
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+        } finally {
+            if (tmp.exists()) {
+                tmp.delete()
+            }
+        }
+        if (!file.exists() || file.length() < data.size.toLong()) {
+            throw IllegalStateException(
+                "tmp+rename verify failed: exists=${file.exists()} len=${file.length()} want=${data.size}",
             )
         }
     }
@@ -58,9 +119,43 @@ class FileTransferUserService : IFileTransferService.Stub() {
         if (!file.exists()) return
         try {
             RandomAccessFile(file, "rw").use { it.setLength(0) }
+            return
         } catch (e: Exception) {
-            Log.w(TAG, "truncate failed, will try FileOutputStream: ${file.path}", e)
+            Log.w(TAG, "truncate failed: ${file.path}", e)
         }
+        try {
+            Os.remove(file.path)
+        } catch (e: Exception) {
+            Log.w(TAG, "Os.remove failed: ${file.path}", e)
+        }
+    }
+
+    /**
+     * Пошаговое создание каталогов: на части HyperOS/Infinix [File.mkdirs]
+     * молча возвращает false на глубоких путях Android/data.
+     */
+    private fun ensureDirectory(dir: File): Boolean {
+        if (dir.exists()) return dir.isDirectory
+        if (dir.mkdirs()) return true
+
+        val missing = ArrayList<File>()
+        var cur: File? = dir
+        while (cur != null && !cur.exists()) {
+            missing.add(cur)
+            cur = cur.parentFile
+        }
+        for (i in missing.indices.reversed()) {
+            val d = missing[i]
+            if (d.exists()) {
+                if (!d.isDirectory) return false
+                continue
+            }
+            if (!d.mkdir() && !(d.exists() && d.isDirectory)) {
+                Log.w(TAG, "mkdir step failed: ${d.path}")
+                return false
+            }
+        }
+        return dir.exists() && dir.isDirectory
     }
 
     override fun readChunk(path: String, offset: Long, length: Int): ByteArray? {

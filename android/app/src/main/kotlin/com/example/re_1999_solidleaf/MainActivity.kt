@@ -18,10 +18,10 @@ import java.io.InputStreamReader
 class MainActivity : FlutterActivity() {
     private val channelName = "com.example.re_1999_solidleaf/shizuku"
     private val REQUEST_SHIZUKU = 1001
-    // Чуть дольше на HyperOS/Honor: UserService иногда поднимается медленно.
-    private val SERVICE_BIND_TIMEOUT_MS = 8000L
-    private val SERVICE_BIND_RETRY_DELAY_MS = 1600L
-    private val SERVICE_BIND_MAX_ATTEMPTS = 4
+    // HyperOS / Transsion (Infinix): UserService поднимается медленно.
+    private val SERVICE_BIND_TIMEOUT_MS = 10000L
+    private val SERVICE_BIND_RETRY_DELAY_MS = 1800L
+    private val SERVICE_BIND_MAX_ATTEMPTS = 5
 
     private val gamePackageCandidates = listOf(
         "com.bluepoch.m.en.reverse1999",
@@ -38,13 +38,20 @@ class MainActivity : FlutterActivity() {
     private var pendingServiceTimeout: Runnable? = null
     private var pendingServiceRetry: Runnable? = null
     private var serviceBindAttempt = 0
+    private var shizukuListenersRegistered = false
 
     private val userServiceArgs: Shizuku.UserServiceArgs by lazy {
+        // tag стабилен после ProGuard; version бампим при смене логики FS-сервиса.
         Shizuku.UserServiceArgs(ComponentName(packageName, FileTransferUserService::class.java.name))
             .daemon(false)
             .processNameSuffix("filesvc")
+            .tag("solidleaf_filesvc")
             .debuggable(false)
-            .version(1)
+            .version(2)
+    }
+
+    private val binderDeadListener = Shizuku.OnBinderDeadListener {
+        fileService = null
     }
 
     private val fileServiceConnection = object : ServiceConnection {
@@ -87,6 +94,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        ensureShizukuListeners()
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler { call, result ->
             when (call.method) {
@@ -247,13 +255,72 @@ class MainActivity : FlutterActivity() {
                         result.error("FS_ERROR", e.message, null)
                     }
                 }
+                "fsProbeWrite" -> {
+                    // Быстрая проверка записи в Android/data до полной установки.
+                    val path = call.arguments as? String ?: ""
+                    try {
+                        val svc = requireFileService()
+                        val probe = if (path.endsWith("/")) {
+                            path + ".solidleaf_write_probe"
+                        } else {
+                            "$path/.solidleaf_write_probe"
+                        }
+                        val parentOk = svc.mkdirs(
+                            probe.substringBeforeLast('/', missingDelimiterValue = path),
+                        )
+                        if (!parentOk && !svc.exists(
+                                probe.substringBeforeLast('/', missingDelimiterValue = path),
+                            )
+                        ) {
+                            result.success(
+                                mapOf(
+                                    "ok" to false,
+                                    "stage" to "mkdirs",
+                                    "path" to probe,
+                                    "error" to "cannot create parent directory",
+                                ),
+                            )
+                            return@setMethodCallHandler
+                        }
+                        val payload = "ok".toByteArray(Charsets.UTF_8)
+                        val wrote = svc.writeChunk(probe, payload, false)
+                        val size = svc.fileSize(probe)
+                        svc.deleteRecursive(probe)
+                        val ok = wrote && size >= payload.size
+                        result.success(
+                            mapOf(
+                                "ok" to ok,
+                                "stage" to if (ok) "write" else "verify",
+                                "path" to probe,
+                                "size" to size,
+                                "error" to if (ok) null else "write/verify failed",
+                            ),
+                        )
+                    } catch (e: Exception) {
+                        result.error("FS_ERROR", e.message, null)
+                    }
+                }
                 else -> result.notImplemented()
             }
         }
     }
 
+    private fun ensureShizukuListeners() {
+        if (shizukuListenersRegistered) return
+        shizukuListenersRegistered = true
+        try {
+            Shizuku.addBinderDeadListener(binderDeadListener)
+        } catch (_: Exception) {
+        }
+    }
+
     private fun requireFileService(): IFileTransferService {
-        return fileService ?: throw IllegalStateException("Shizuku file service is not bound. Call ensureFileService first.")
+        val current = fileService
+        if (current != null && current.asBinder().pingBinder()) {
+            return current
+        }
+        fileService = null
+        throw IllegalStateException("Shizuku file service is not bound. Call ensureFileService first.")
     }
 
     private fun completePendingServiceResult(success: Boolean, error: String?) {
@@ -277,6 +344,7 @@ class MainActivity : FlutterActivity() {
             result.success(true)
             return
         }
+        fileService = null
 
         if (pendingServiceResult != null) {
             result.error("SERVICE_BIND_IN_PROGRESS", "Shizuku file service is already connecting", null)
@@ -302,6 +370,14 @@ class MainActivity : FlutterActivity() {
         startFileServiceBindAttempt()
     }
 
+    /**
+     * Стратегия bind без «ломания» Shizuku на HyperOS / Infinix:
+     * 1) первый раз — только bind (без unbind);
+     * 2) мягкие ретраи — unbind(remove=false);
+     * 3) последний шанс — unbind(remove=true).
+     * Жёсткий remove=true на каждой попытке даёт «provider is null» и
+     * таймаут UserService при живом binder + выданных правах.
+     */
     private fun startFileServiceBindAttempt() {
         val pending = pendingServiceResult ?: return
         serviceBindAttempt += 1
@@ -320,9 +396,14 @@ class MainActivity : FlutterActivity() {
         }
         mainHandler.postDelayed(pendingServiceTimeout!!, SERVICE_BIND_TIMEOUT_MS)
 
-        try {
-            Shizuku.unbindUserService(userServiceArgs, fileServiceConnection, true)
-        } catch (_: Exception) {
+        fileService = null
+
+        if (attempt > 1) {
+            val forceRemove = attempt >= SERVICE_BIND_MAX_ATTEMPTS
+            try {
+                Shizuku.unbindUserService(userServiceArgs, fileServiceConnection, forceRemove)
+            } catch (_: Exception) {
+            }
         }
 
         try {
@@ -340,6 +421,7 @@ class MainActivity : FlutterActivity() {
         pendingServiceTimeout = null
 
         if (serviceBindAttempt < SERVICE_BIND_MAX_ATTEMPTS) {
+            val delay = SERVICE_BIND_RETRY_DELAY_MS + (serviceBindAttempt - 1) * 400L
             pendingServiceRetry = Runnable {
                 if (pendingServiceResult === pending) {
                     val state = getShizukuState()
@@ -350,16 +432,16 @@ class MainActivity : FlutterActivity() {
                     startFileServiceBindAttempt()
                 }
             }
-            mainHandler.postDelayed(pendingServiceRetry!!, SERVICE_BIND_RETRY_DELAY_MS)
+            mainHandler.postDelayed(pendingServiceRetry!!, delay)
             return
         }
 
         completePendingServiceResult(
             false,
             "$reason. Shizuku «активен», но file service не подключился. "
-                + "На HyperOS / Honor / MIUI: перезапустите Shizuku, отключите "
-                + "оптимизацию батареи для Shizuku и SolidLeaf, снова выдайте "
-                + "разрешение приложению и повторите установку.",
+                + "На HyperOS / Redmi / Infinix: Stop→Start в Shizuku, батарея "
+                + "«без ограничений» для Shizuku и SolidLeaf, снова разрешите "
+                + "доступ и повторите (не сворачивайте лаунчер).",
         )
     }
 
@@ -451,11 +533,21 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         super.onDestroy()
         try {
-            if (fileService != null) {
-                Shizuku.unbindUserService(userServiceArgs, fileServiceConnection, true)
+            if (shizukuListenersRegistered) {
+                Shizuku.removeBinderDeadListener(binderDeadListener)
+                shizukuListenersRegistered = false
             }
         } catch (_: Exception) {
         }
+        try {
+            // remove=false: не убиваем процесс сервиса при повороте/пересоздании Activity.
+            // Иначе на HyperOS следующий bind часто зависает до полного рестарта Shizuku.
+            if (fileService != null) {
+                Shizuku.unbindUserService(userServiceArgs, fileServiceConnection, false)
+            }
+        } catch (_: Exception) {
+        }
+        fileService = null
     }
 
     /**

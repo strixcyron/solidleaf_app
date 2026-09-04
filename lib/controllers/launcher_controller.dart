@@ -803,6 +803,12 @@ class LauncherController extends ChangeNotifier {
         }
         lastErrorMessage = 'Не удалось подключить Shizuku file service';
       } on PlatformException catch (e) {
+        // Параллельный bind уже идёт — ждём, не считаем фатальной ошибкой.
+        if (e.code == 'SERVICE_BIND_IN_PROGRESS') {
+          lastErrorMessage = e.message ?? e.code;
+          await Future<void>.delayed(Duration(milliseconds: 900 * attempt));
+          continue;
+        }
         final message =
             'Shizuku file service недоступен: ${e.message ?? e.code}';
         lastErrorMessage = message;
@@ -820,13 +826,46 @@ class LauncherController extends ChangeNotifier {
     final detail = lastErrorMessage ?? 'неизвестная ошибка';
     final message =
         'Shizuku отвечает, но сервис записи файлов не подключился ($detail). '
-        'На HyperOS / Honor / MIUI: перезапустите Shizuku, отключите '
-        'оптимизацию батареи для Shizuku и SolidLeaf, снова разрешите доступ '
-        'и повторите установку.';
+        'На HyperOS / Redmi / Infinix: Stop→Start в Shizuku, батарея без '
+        'ограничений для Shizuku и SolidLeaf, снова разрешите доступ и '
+        'повторите (не сворачивайте лаунчер).';
     statusText = message;
     addLog(message);
     notifyListeners();
     throw PatchInstallException(message);
+  }
+
+  /// Проверка реальной записи в Android/data до копирования архива.
+  Future<void> _probeAndroidWriteAccess(String targetRoot) async {
+    const methodChannel = MethodChannel(shizukuChannel);
+    try {
+      final raw = await methodChannel.invokeMethod<dynamic>(
+        'fsProbeWrite',
+        targetRoot,
+      );
+      if (raw is Map && raw['ok'] == true) {
+        addLog('Проверка записи Shizuku: OK ($targetRoot)');
+        return;
+      }
+      final stage = raw is Map ? raw['stage'] : null;
+      final err = raw is Map ? raw['error'] : null;
+      throw Exception('probe failed stage=$stage error=$err');
+    } on PlatformException catch (e) {
+      throw PatchInstallException(
+        'Shizuku подключён, но запись в папку игры запрещена оболочкой:\n'
+        '${e.message ?? e.code}\n'
+        'Путь: $targetRoot\n'
+        'На HyperOS / Redmi / Infinix: Stop→Start Shizuku, уберите ограничение '
+        'батареи, закройте игру и повторите.',
+      );
+    } catch (e) {
+      throw PatchInstallException(
+        'Не удалось проверить запись в данные игры через Shizuku.\n'
+        'Путь: $targetRoot\n'
+        'Детали: $e\n'
+        'Перезапустите Shizuku и повторите установку, не сворачивая лаунчер.',
+      );
+    }
   }
 
   /// Запрашивает permission у Shizuku, если binder жив, а доступа ещё нет.
@@ -992,8 +1031,8 @@ class LauncherController extends ChangeNotifier {
 
   Future<void> _fsWriteLocalFile(File localFile, String dstPath) async {
     Object? lastError;
-    // 1–2 повтора: на Honor/HyperOS binder иногда отваливается mid-copy.
-    for (var attempt = 1; attempt <= 2; attempt++) {
+    // До 3 попыток: на HyperOS/Infinix binder иногда отваливается mid-copy.
+    for (var attempt = 1; attempt <= 3; attempt++) {
       try {
         await _fsWriteLocalFileOnce(localFile, dstPath);
         return;
@@ -1001,15 +1040,15 @@ class LauncherController extends ChangeNotifier {
         lastError = e;
         addLog(
           'Запись ${path.basename(dstPath)} не удалась '
-          '(попытка $attempt/2): $e',
+          '(попытка $attempt/3): $e',
         );
-        if (attempt < 2) {
+        if (attempt < 3) {
           try {
             await _ensureFileService(attempts: 2);
           } catch (_) {
             // Следующая попытка всё равно пойдёт — покажем итоговую ошибку.
           }
-          await Future<void>.delayed(Duration(milliseconds: 350 * attempt));
+          await Future<void>.delayed(Duration(milliseconds: 400 * attempt));
         }
       }
     }
@@ -2368,21 +2407,25 @@ class LauncherController extends ChangeNotifier {
                   .toList()
             : <File>[];
 
+        final mkOk = await _fsMkdirs(finalTarget);
+        if (!mkOk) {
+          throw PatchInstallException(
+            'Shizuku запущен, но нельзя создать папку в данных игры:\n'
+            '$finalTarget\n'
+            'На HyperOS / Redmi / Infinix отключите оптимизацию батареи для '
+            'Shizuku и SolidLeaf, Stop→Start в Shizuku и повторите.',
+          );
+        }
+
+        // До бэкапа/копирования — убеждаемся, что оболочка реально пускает запись.
+        await _probeAndroidWriteAccess(finalTarget);
+
         await _backupOnlyOverwrittenFiles(
           sourceDir,
           finalTarget,
           allFiles,
           kind: archiveKind,
         );
-        final mkOk = await _fsMkdirs(finalTarget);
-        if (!mkOk) {
-          throw PatchInstallException(
-            'Shizuku запущен, но нельзя создать папку в данных игры:\n'
-            '$finalTarget\n'
-            'На HyperOS / Honor отключите оптимизацию батареи для Shizuku '
-            'и SolidLeaf, перезапустите Shizuku и повторите.',
-          );
-        }
 
         int copied = 0;
         String? firstError;
@@ -2402,9 +2445,9 @@ class LauncherController extends ChangeNotifier {
           throw PatchInstallException(
             'Скопировано $copied из ${allFiles.length} файлов через Shizuku'
             '${firstError != null ? '.\nПричина: $firstError' : '.'}\n'
-            'Оболочка (HyperOS / Honor / MIUI) часто режет запись в '
-            'Android/data. Перезапустите Shizuku, отключите ограничение '
-            'фона/батареи для Shizuku и SolidLeaf, закройте игру и повторите.',
+            'Оболочка (HyperOS / Redmi / Infinix) часто режет запись в '
+            'Android/data. Stop→Start в Shizuku, батарея без ограничений '
+            'для Shizuku и SolidLeaf, закройте игру и повторите.',
           );
         }
 

@@ -161,8 +161,9 @@ UserFacingError describeInstallErrorDetailed(
           'блокирует запись в папку игры.',
       steps: [
         'Откройте Shizuku → Stop → Start, снова разрешите SolidLeaf',
-        'На HyperOS / Honor / MIUI: настройки батареи → без ограничений '
+        'На HyperOS / Redmi / Infinix: батарея → без ограничений '
             'для Shizuku и SolidLeaf',
+        'Не сворачивайте лаунчер во время установки',
         'Закройте Reverse: 1999 полностью и повторите установку',
       ],
     );
