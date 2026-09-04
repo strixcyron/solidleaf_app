@@ -655,18 +655,70 @@ class LauncherController extends ChangeNotifier {
       }
     }
 
-    const message =
-        'Shizuku не подключён. Откройте Shizuku, нажмите Start, разрешите доступ приложению и повторите попытку.';
+    final detail = lastErrorMessage ?? 'неизвестная ошибка';
+    final message =
+        'Shizuku отвечает, но сервис записи файлов не подключился ($detail). '
+        'На HyperOS / Honor / MIUI: перезапустите Shizuku, отключите '
+        'оптимизацию батареи для Shizuku и SolidLeaf, снова разрешите доступ '
+        'и повторите установку.';
     statusText = message;
     addLog(message);
     notifyListeners();
-    throw Exception(lastErrorMessage ?? message);
+    throw PatchInstallException(message);
+  }
+
+  /// Запрашивает permission у Shizuku, если binder жив, а доступа ещё нет.
+  Future<void> _ensureShizukuPermission() async {
+    const methodChannel = MethodChannel(shizukuChannel);
+    try {
+      final state = await methodChannel.invokeMethod<dynamic>('getShizukuState');
+      if (state is! Map) return;
+      final binderAlive = state['binderAlive'] == true;
+      final hasPermission = state['hasPermission'] == true;
+      if (binderAlive && !hasPermission) {
+        addLog('Запрос разрешения Shizuku...');
+        await methodChannel.invokeMethod<bool>('requestPermission');
+        await Future<void>.delayed(const Duration(milliseconds: 900));
+        await checkShizukuStatus();
+      }
+    } catch (e) {
+      addLog('Не удалось запросить разрешение Shizuku: $e');
+    }
+  }
+
+  /// Уточняет пакет игры (EN/CN) и путь Android/data перед установкой.
+  Future<void> _resolveAndroidGameInstallPath() async {
+    if (!Platform.isAndroid) return;
+    const methodChannel = MethodChannel(shizukuChannel);
+    try {
+      final pkg =
+          await methodChannel.invokeMethod<String>('resolveGamePackage');
+      if (pkg == null || pkg.isEmpty) {
+        addLog(
+          'Пакет игры не найден — используем путь по умолчанию: $installPath',
+        );
+        return;
+      }
+      final resolved = GamePathFinder.androidDataPathFor(pkg);
+      if (resolved != installPath) {
+        installPath = resolved;
+        _refreshInstallPathState();
+        addLog('Путь Android/data игры: $installPath (пакет $pkg)');
+        notifyListeners();
+      }
+    } catch (e) {
+      addLog('resolveGamePackage: $e — оставляем $installPath');
+    }
   }
 
   Future<bool> _fsMkdirs(String targetPath) async {
     const methodChannel = MethodChannel(shizukuChannel);
-    return await methodChannel.invokeMethod<bool>('fsMkdirs', targetPath) ??
-        false;
+    try {
+      return await methodChannel.invokeMethod<bool>('fsMkdirs', targetPath) ??
+          false;
+    } on PlatformException catch (e) {
+      throw Exception('mkdirs: ${e.message ?? e.code} ($targetPath)');
+    }
   }
 
   Future<bool> _fsWriteChunk(
@@ -675,12 +727,16 @@ class LauncherController extends ChangeNotifier {
     bool append,
   ) async {
     const methodChannel = MethodChannel(shizukuChannel);
-    return await methodChannel.invokeMethod<bool>('fsWriteChunk', {
-          'path': targetPath,
-          'data': data,
-          'append': append,
-        }) ??
-        false;
+    try {
+      return await methodChannel.invokeMethod<bool>('fsWriteChunk', {
+            'path': targetPath,
+            'data': data,
+            'append': append,
+          }) ??
+          false;
+    } on PlatformException catch (e) {
+      throw Exception('writeChunk: ${e.message ?? e.code} ($targetPath)');
+    }
   }
 
   Future<Uint8List?> _fsReadChunk(
@@ -689,41 +745,61 @@ class LauncherController extends ChangeNotifier {
     int length,
   ) async {
     const methodChannel = MethodChannel(shizukuChannel);
-    final result = await methodChannel.invokeMethod('fsReadChunk', {
-      'path': targetPath,
-      'offset': offset,
-      'length': length,
-    });
-    if (result == null) return null;
-    return Uint8List.fromList(List<int>.from(result as List));
+    try {
+      final result = await methodChannel.invokeMethod('fsReadChunk', {
+        'path': targetPath,
+        'offset': offset,
+        'length': length,
+      });
+      if (result == null) return null;
+      return Uint8List.fromList(List<int>.from(result as List));
+    } on PlatformException catch (e) {
+      throw Exception('readChunk: ${e.message ?? e.code} ($targetPath)');
+    }
   }
 
   Future<int> _fsFileSize(String targetPath) async {
     const methodChannel = MethodChannel(shizukuChannel);
-    final result = await methodChannel.invokeMethod<int>(
-      'fsFileSize',
-      targetPath,
-    );
-    return result ?? -1;
+    try {
+      final result = await methodChannel.invokeMethod<int>(
+        'fsFileSize',
+        targetPath,
+      );
+      return result ?? -1;
+    } on PlatformException catch (e) {
+      throw Exception('fileSize: ${e.message ?? e.code} ($targetPath)');
+    }
   }
 
   Future<bool> _fsDeleteRecursive(String targetPath) async {
     const methodChannel = MethodChannel(shizukuChannel);
-    return await methodChannel.invokeMethod<bool>(
-          'fsDeleteRecursive',
-          targetPath,
-        ) ??
-        false;
+    try {
+      return await methodChannel.invokeMethod<bool>(
+            'fsDeleteRecursive',
+            targetPath,
+          ) ??
+          false;
+    } on PlatformException catch (e) {
+      throw Exception('delete: ${e.message ?? e.code} ($targetPath)');
+    }
   }
 
   Future<bool> _fsExists(String targetPath) async {
     const methodChannel = MethodChannel(shizukuChannel);
-    return await methodChannel.invokeMethod<bool>('fsExists', targetPath) ??
-        false;
+    try {
+      return await methodChannel.invokeMethod<bool>('fsExists', targetPath) ??
+          false;
+    } on PlatformException catch (e) {
+      throw Exception('exists: ${e.message ?? e.code} ($targetPath)');
+    }
   }
 
   Future<void> _fsCopyFile(String src, String dst) async {
     await _fsMkdirs(path.dirname(dst));
+    // Перед перезаписью бэкапа убираем старый файл (OEM truncate).
+    if (await _fsExists(dst)) {
+      await _fsDeleteRecursive(dst);
+    }
     final size = await _fsFileSize(src);
     if (size < 0) {
       throw Exception('Источник не найден или недоступен: $src');
@@ -753,7 +829,40 @@ class LauncherController extends ChangeNotifier {
   }
 
   Future<void> _fsWriteLocalFile(File localFile, String dstPath) async {
+    Object? lastError;
+    // 1–2 повтора: на Honor/HyperOS binder иногда отваливается mid-copy.
+    for (var attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await _fsWriteLocalFileOnce(localFile, dstPath);
+        return;
+      } catch (e) {
+        lastError = e;
+        addLog(
+          'Запись ${path.basename(dstPath)} не удалась '
+          '(попытка $attempt/2): $e',
+        );
+        if (attempt < 2) {
+          try {
+            await _ensureFileService(attempts: 2);
+          } catch (_) {
+            // Следующая попытка всё равно пойдёт — покажем итоговую ошибку.
+          }
+          await Future<void>.delayed(Duration(milliseconds: 350 * attempt));
+        }
+      }
+    }
+    throw lastError ?? Exception('Не удалось записать $dstPath');
+  }
+
+  Future<void> _fsWriteLocalFileOnce(File localFile, String dstPath) async {
     await _fsMkdirs(path.dirname(dstPath));
+    // Удаляем целевой файл до записи — обход O_TRUNC на HyperOS/Honor.
+    if (await _fsExists(dstPath)) {
+      final deleted = await _fsDeleteRecursive(dstPath);
+      if (!deleted && await _fsExists(dstPath)) {
+        addLog('Предупреждение: не удалось удалить перед записью: $dstPath');
+      }
+    }
     final data = await localFile.readAsBytes();
     if (data.isEmpty) {
       final ok = await _fsWriteChunk(dstPath, Uint8List(0), false);
@@ -1566,9 +1675,12 @@ class LauncherController extends ChangeNotifier {
     if (Platform.isAndroid) {
       try {
         const methodChannel = MethodChannel(shizukuChannel);
-        await methodChannel.invokeMethod<bool>('launchGame');
+        final launchedPkg =
+            await methodChannel.invokeMethod<String>('launchGame');
         statusText = 'Игра запущена';
-        addLog('Запуск игры (Android): com.bluepoch.m.en.reverse1999');
+        addLog(
+          'Запуск игры (Android): ${launchedPkg ?? 'com.bluepoch.m.en.reverse1999'}',
+        );
         notifyListeners();
       } on PlatformException catch (e) {
         throw Exception(
@@ -1965,6 +2077,13 @@ class LauncherController extends ChangeNotifier {
           'Shizuku не запущен. Откройте Shizuku, нажмите Start и повторите.',
         );
       }
+      await _ensureShizukuPermission();
+      if (!isShizukuActive) {
+        throw PatchInstallException(
+          'Нет разрешения Shizuku. Откройте Shizuku → разрешите доступ SolidLeaf.',
+        );
+      }
+      await _resolveAndroidGameInstallPath();
       await _ensureFileService();
 
       final tempRoot = await getTemporaryDirectory();
@@ -1998,7 +2117,7 @@ class LauncherController extends ChangeNotifier {
           }
         }
 
-        final normTarget = path.normalize(targetDir);
+        final normTarget = path.normalize(installPath.isNotEmpty ? installPath : targetDir);
         String sourceDir = workDir.path;
         String finalTarget = normTarget;
 
@@ -2036,7 +2155,15 @@ class LauncherController extends ChangeNotifier {
           allFiles,
           kind: archiveKind,
         );
-        await _fsMkdirs(finalTarget);
+        final mkOk = await _fsMkdirs(finalTarget);
+        if (!mkOk) {
+          throw PatchInstallException(
+            'Shizuku запущен, но нельзя создать папку в данных игры:\n'
+            '$finalTarget\n'
+            'На HyperOS / Honor отключите оптимизацию батареи для Shizuku '
+            'и SolidLeaf, перезапустите Shizuku и повторите.',
+          );
+        }
 
         int copied = 0;
         String? firstError;
@@ -2052,9 +2179,13 @@ class LauncherController extends ChangeNotifier {
           }
         }
 
-        if (copied == 0 && allFiles.isNotEmpty) {
-          throw Exception(
-            'Не удалось скопировать ни одного файла через Shizuku${firstError != null ? ': $firstError' : ''}',
+        if (allFiles.isNotEmpty && copied < allFiles.length) {
+          throw PatchInstallException(
+            'Скопировано $copied из ${allFiles.length} файлов через Shizuku'
+            '${firstError != null ? '.\nПричина: $firstError' : '.'}\n'
+            'Оболочка (HyperOS / Honor / MIUI) часто режет запись в '
+            'Android/data. Перезапустите Shizuku, отключите ограничение '
+            'фона/батареи для Shizuku и SolidLeaf, закройте игру и повторите.',
           );
         }
 

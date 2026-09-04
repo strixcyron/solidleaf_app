@@ -859,40 +859,111 @@ class _MainScreenState extends State<MainScreen>
   }
 
   Future<void> _showChangelogDialog(LauncherController controller) async {
-    await showDialog<void>(
+    final body = controller.changelog.trim().isEmpty
+        ? 'Список изменений пока недоступен.'
+        : controller.changelog.trim();
+    final version = controller.remoteVersion;
+    final hasVersion = version.isNotEmpty && version != '—';
+
+    await showModalBottomSheet<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Theme.of(context).cardColor,
-        title: Text(
-          'Что нового',
-          style: TextStyle(
-            color: Theme.of(context).textTheme.bodyMedium?.color,
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        content: SizedBox(
-          width: 420,
-          child: SingleChildScrollView(
-            child: Text(
-              controller.changelog.isEmpty
-                  ? 'Список изменений пока недоступен.'
-                  : controller.changelog,
-              style: TextStyle(
-                color: Theme.of(context).textTheme.bodySmall?.color,
-                fontSize: 13,
-                height: 1.45,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).cardColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        final textColor = Theme.of(ctx).textTheme.bodyMedium?.color;
+        final secondary = Theme.of(ctx).textTheme.bodySmall?.color;
+        final maxH = MediaQuery.sizeOf(ctx).height * 0.72;
+        return SafeArea(
+          child: Padding(
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 12,
+              bottom: 16 + MediaQuery.of(ctx).viewInsets.bottom,
+            ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: maxH),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  _infoDialogTitle(
+                    Icons.newspaper_rounded,
+                    'Что нового',
+                  ),
+                  if (hasVersion) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFC9A227).withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.tag_rounded,
+                            color: Color(0xFFC9A227),
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Версия русификатора: $version',
+                              style: TextStyle(
+                                color: textColor,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: Text(
+                        body,
+                        style: TextStyle(
+                          color: secondary ?? textColor?.withValues(alpha: 0.85),
+                          fontSize: 13,
+                          height: 1.45,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _fullWidthDialogButton(
+                    icon: Icons.check_rounded,
+                    label: 'Понятно',
+                    filled: true,
+                    onPressed: () => Navigator.of(ctx).pop(),
+                  ),
+                ],
               ),
             ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Закрыть'),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -1033,18 +1104,46 @@ class _MainScreenState extends State<MainScreen>
             MagneticHover(
               child: Tooltip(
                 message: 'Список изменений последней версии русификатора',
-                child: OutlinedButton(
-                  onPressed: () => _showChangelogDialog(controller),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 16,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: const Text('Что нового?'),
+                child: Builder(
+                  builder: (context) {
+                    final onSurface =
+                        Theme.of(context).textTheme.bodyMedium?.color ??
+                            Colors.white;
+                    final fill = Theme.of(context).cardColor;
+                    return OutlinedButton.icon(
+                      onPressed: () => _showChangelogDialog(controller),
+                      icon: Icon(
+                        Icons.newspaper_rounded,
+                        size: 18,
+                        color: onSurface,
+                      ),
+                      label: Text(
+                        'Что нового?',
+                        style: TextStyle(
+                          color: onSurface,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: onSurface,
+                        backgroundColor: fill,
+                        side: BorderSide(
+                          color: onSurface.withValues(alpha: 0.45),
+                          width: 1.4,
+                        ),
+                        elevation: 1,
+                        shadowColor: Colors.black54,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 16,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ),
             ),

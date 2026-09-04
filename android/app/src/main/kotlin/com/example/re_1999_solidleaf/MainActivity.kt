@@ -18,9 +18,15 @@ import java.io.InputStreamReader
 class MainActivity : FlutterActivity() {
     private val channelName = "com.example.re_1999_solidleaf/shizuku"
     private val REQUEST_SHIZUKU = 1001
-    private val SERVICE_BIND_TIMEOUT_MS = 6500L
-    private val SERVICE_BIND_RETRY_DELAY_MS = 1500L
-    private val SERVICE_BIND_MAX_ATTEMPTS = 3
+    // Чуть дольше на HyperOS/Honor: UserService иногда поднимается медленно.
+    private val SERVICE_BIND_TIMEOUT_MS = 8000L
+    private val SERVICE_BIND_RETRY_DELAY_MS = 1600L
+    private val SERVICE_BIND_MAX_ATTEMPTS = 4
+
+    private val gamePackageCandidates = listOf(
+        "com.bluepoch.m.en.reverse1999",
+        "com.bluepoch.m.cn.reverse1999",
+    )
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -125,21 +131,57 @@ class MainActivity : FlutterActivity() {
                 }
                 "launchGame" -> {
                     try {
-                        val pkg = "com.bluepoch.m.en.reverse1999"
-                        val launch = packageManager.getLaunchIntentForPackage(pkg)
-                        if (launch != null) {
-                            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            startActivity(launch)
-                            result.success(true)
+                        var launchedPkg: String? = null
+                        for (pkg in gamePackageCandidates) {
+                            try {
+                                packageManager.getPackageInfo(pkg, 0)
+                            } catch (_: PackageManager.NameNotFoundException) {
+                                continue
+                            }
+                            val launch = packageManager.getLaunchIntentForPackage(pkg)
+                                ?: Intent(Intent.ACTION_MAIN).apply {
+                                    addCategory(Intent.CATEGORY_LAUNCHER)
+                                    setPackage(pkg)
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }.takeIf {
+                                    packageManager.queryIntentActivities(it, 0).isNotEmpty()
+                                }
+                            if (launch != null) {
+                                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                startActivity(launch)
+                                launchedPkg = pkg
+                                break
+                            }
+                        }
+                        if (launchedPkg != null) {
+                            result.success(launchedPkg)
                         } else {
                             result.error(
                                 "NOT_INSTALLED",
-                                "Игра Reverse: 1999 не установлена на устройстве",
+                                "Игра Reverse: 1999 не установлена "
+                                    + "(пакет com.bluepoch.m.en.reverse1999).",
                                 null,
                             )
                         }
                     } catch (ex: Exception) {
                         result.error("LAUNCH_ERROR", ex.message ?: "Unknown error", null)
+                    }
+                }
+                "resolveGamePackage" -> {
+                    try {
+                        var found: String? = null
+                        for (pkg in gamePackageCandidates) {
+                            try {
+                                packageManager.getPackageInfo(pkg, 0)
+                                found = pkg
+                                break
+                            } catch (_: PackageManager.NameNotFoundException) {
+                                // следующий кандидат
+                            }
+                        }
+                        result.success(found)
+                    } catch (ex: Exception) {
+                        result.error("RESOLVE_ERROR", ex.message ?: "Unknown error", null)
                     }
                 }
                 "ensureFileService" -> ensureFileService(result)
@@ -314,8 +356,10 @@ class MainActivity : FlutterActivity() {
 
         completePendingServiceResult(
             false,
-            "$reason. Проверьте, что Shizuku запущен и разрешение выдано. " +
-                "На некоторых HyperOS/MIUI помогает перезапуск Shizuku."
+            "$reason. Shizuku «активен», но file service не подключился. "
+                + "На HyperOS / Honor / MIUI: перезапустите Shizuku, отключите "
+                + "оптимизацию батареи для Shizuku и SolidLeaf, снова выдайте "
+                + "разрешение приложению и повторите установку.",
         )
     }
 

@@ -1,5 +1,6 @@
 package com.example.re_1999_solidleaf
 
+import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
@@ -22,17 +23,43 @@ class FileTransferUserService : IFileTransferService.Stub() {
             val dir = File(path)
             dir.exists() || dir.mkdirs()
         } catch (e: Exception) {
+            Log.w(TAG, "mkdirs failed: $path", e)
             false
         }
     }
 
     override fun writeChunk(path: String, data: ByteArray, append: Boolean): Boolean {
-        return try {
-            File(path).parentFile?.mkdirs()
+        try {
+            val file = File(path)
+            file.parentFile?.mkdirs()
+
+            // HyperOS / MIUI / Honor: у существующих файлов игры иногда нельзя
+            // сделать O_TRUNC — удаляем или обнуляем перед первой записью.
+            if (!append && file.exists()) {
+                prepareForOverwrite(file)
+            }
+
             FileOutputStream(path, append).use { it.write(data) }
-            true
+            return true
         } catch (e: Exception) {
-            false
+            Log.e(TAG, "writeChunk failed: $path append=$append", e)
+            // Пробрасываем текст ошибки на сторону Flutter (MainActivity → FS_ERROR).
+            throw RuntimeException(
+                "writeChunk: ${e.javaClass.simpleName}: ${e.message ?: "unknown"} @ $path",
+                e,
+            )
+        }
+    }
+
+    /** Удаление / truncate перед перезаписью — без этого OEM-оболочки часто падают. */
+    private fun prepareForOverwrite(file: File) {
+        if (!file.exists()) return
+        if (file.delete()) return
+        if (!file.exists()) return
+        try {
+            RandomAccessFile(file, "rw").use { it.setLength(0) }
+        } catch (e: Exception) {
+            Log.w(TAG, "truncate failed, will try FileOutputStream: ${file.path}", e)
         }
     }
 
@@ -45,6 +72,7 @@ class FileTransferUserService : IFileTransferService.Stub() {
                 if (read <= 0) ByteArray(0) else buffer.copyOf(read)
             }
         } catch (e: Exception) {
+            Log.w(TAG, "readChunk failed: $path", e)
             null
         }
     }
@@ -63,6 +91,7 @@ class FileTransferUserService : IFileTransferService.Stub() {
             if (!file.exists()) return true
             file.deleteRecursively()
         } catch (e: Exception) {
+            Log.w(TAG, "deleteRecursive failed: $path", e)
             false
         }
     }
@@ -85,5 +114,9 @@ class FileTransferUserService : IFileTransferService.Stub() {
 
     override fun destroy() {
         android.os.Process.killProcess(android.os.Process.myPid())
+    }
+
+    companion object {
+        private const val TAG = "SolidLeafFS"
     }
 }

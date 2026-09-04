@@ -10,8 +10,18 @@ class GamePathFinder {
   static const prefsKey = 'install_path';
 
   /// Фиксированный путь к данным игры на Android — выбор папки не нужен.
+  /// Пакет уточняется через [androidDataPathFor] / resolveGamePackage.
+  static const androidGamePackages = <String>[
+    'com.bluepoch.m.en.reverse1999',
+    'com.bluepoch.m.cn.reverse1999',
+  ];
+
   static const androidInstallPath =
       '/storage/emulated/0/Android/data/com.bluepoch.m.en.reverse1999/';
+
+  /// Каталог Android/data для установленного пакета игры.
+  static String androidDataPathFor(String packageName) =>
+      '/storage/emulated/0/Android/data/$packageName/';
 
   /// Папка данных Unity — обязательный признак корня установки на Windows.
   static const dataFolderName = 'reverse1999_Data';

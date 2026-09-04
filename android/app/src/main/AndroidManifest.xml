@@ -67,5 +67,10 @@
 
         <package android:name="org.telegram.messenger"/>
         <package android:name="org.telegram.messenger.web"/>
+        <!-- Запуск Reverse: 1999 (Android 11+ package visibility). -->
+        <package android:name="com.bluepoch.m.en.reverse1999"/>
+        <package android:name="com.bluepoch.m.cn.reverse1999"/>
+        <package android:name="moe.shizuku.manager"/>
+        <package android:name="moe.shizuku.privileged.api"/>
     </queries>
 </manifest>

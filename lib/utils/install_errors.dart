@@ -150,14 +150,20 @@ UserFacingError describeInstallErrorDetailed(
 
   final text = sanitizeUserErrorText(error.toString()).toLowerCase();
 
-  if (text.contains('shizuku')) {
+  if (text.contains('shizuku') ||
+      text.contains('writechunk') ||
+      text.contains('file service') ||
+      text.contains('скопировано')) {
     return const UserFacingError(
-      title: 'Нужен Shizuku',
-      summary: 'Без активного Shizuku установка на Android невозможна.',
+      title: 'Нужен доступ Shizuku',
+      summary:
+          'Shizuku может отображаться активным, но оболочка телефона '
+          'блокирует запись в папку игры.',
       steps: [
-        'Откройте приложение Shizuku и нажмите Start',
-        'Разрешите доступ лаунчеру SolidLeaf',
-        'Вернитесь сюда и повторите установку',
+        'Откройте Shizuku → Stop → Start, снова разрешите SolidLeaf',
+        'На HyperOS / Honor / MIUI: настройки батареи → без ограничений '
+            'для Shizuku и SolidLeaf',
+        'Закройте Reverse: 1999 полностью и повторите установку',
       ],
     );
   }
