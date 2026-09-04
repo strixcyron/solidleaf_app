@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -14,14 +15,15 @@ import io.flutter.plugin.common.MethodChannel
 import rikka.shizuku.Shizuku
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import android.util.Log
 
 class MainActivity : FlutterActivity() {
     private val channelName = "com.example.re_1999_solidleaf/shizuku"
     private val REQUEST_SHIZUKU = 1001
-    // HyperOS / Transsion (Infinix): UserService поднимается медленно.
-    private val SERVICE_BIND_TIMEOUT_MS = 10000L
-    private val SERVICE_BIND_RETRY_DELAY_MS = 1800L
-    private val SERVICE_BIND_MAX_ATTEMPTS = 5
+    // HyperOS часто не поднимает UserService — меньше ретраев, быстрее process-fallback.
+    private val SERVICE_BIND_TIMEOUT_MS = 7000L
+    private val SERVICE_BIND_RETRY_DELAY_MS = 1000L
+    private val SERVICE_BIND_MAX_ATTEMPTS = 3
 
     private val gamePackageCandidates = listOf(
         "com.bluepoch.m.en.reverse1999",
@@ -39,19 +41,35 @@ class MainActivity : FlutterActivity() {
     private var pendingServiceRetry: Runnable? = null
     private var serviceBindAttempt = 0
     private var shizukuListenersRegistered = false
+    /** HyperOS fallback: UserService timeout → Shizuku.newProcess. */
+    private var useProcessFsFallback = false
+    /** 0 = daemon(true), 1 = daemon(false). */
+    private var bindProfile = 0
 
-    private val userServiceArgs: Shizuku.UserServiceArgs by lazy {
-        // tag стабилен после ProGuard; version бампим при смене логики FS-сервиса.
+    private val userServiceArgsDaemon: Shizuku.UserServiceArgs by lazy {
         Shizuku.UserServiceArgs(ComponentName(packageName, FileTransferUserService::class.java.name))
             .daemon(true)
             .processNameSuffix("filesvc")
             .tag("solidleaf_filesvc")
             .debuggable(false)
-            .version(5)
+            .version(6)
     }
+
+    private val userServiceArgsNoDaemon: Shizuku.UserServiceArgs by lazy {
+        Shizuku.UserServiceArgs(ComponentName(packageName, FileTransferUserService::class.java.name))
+            .daemon(false)
+            .processNameSuffix("filesvc2")
+            .tag("solidleaf_filesvc_nodaemon")
+            .debuggable(false)
+            .version(6)
+    }
+
+    private fun activeUserServiceArgs(): Shizuku.UserServiceArgs =
+        if (bindProfile == 0) userServiceArgsDaemon else userServiceArgsNoDaemon
 
     private val binderDeadListener = Shizuku.OnBinderDeadListener {
         fileService = null
+        useProcessFsFallback = false
     }
 
     private val fileServiceConnection = object : ServiceConnection {
@@ -103,6 +121,20 @@ class MainActivity : FlutterActivity() {
                 }
                 "getShizukuState" -> {
                     result.success(getShizukuState().toMap())
+                }
+                "getDeviceInfo" -> {
+                    // Временная диагностика HyperOS / OEM.
+                    result.success(
+                        mapOf(
+                            "manufacturer" to Build.MANUFACTURER,
+                            "brand" to Build.BRAND,
+                            "model" to Build.MODEL,
+                            "device" to Build.DEVICE,
+                            "sdk" to Build.VERSION.SDK_INT,
+                            "release" to Build.VERSION.RELEASE,
+                            "packageName" to packageName,
+                        ),
+                    )
                 }
                 "checkPermission" -> {
                     result.success(getShizukuState().hasPermission)
@@ -196,7 +228,7 @@ class MainActivity : FlutterActivity() {
                 "fsMkdirs" -> {
                     val path = call.arguments as? String ?: ""
                     try {
-                        result.success(requireFileService().mkdirs(path))
+                        result.success(fsMkdirs(path))
                     } catch (e: Exception) {
                         result.error("FS_ERROR", e.message, null)
                     }
@@ -207,9 +239,34 @@ class MainActivity : FlutterActivity() {
                     val data = args?.get("data") as? ByteArray ?: ByteArray(0)
                     val append = args?.get("append") as? Boolean ?: false
                     try {
-                        result.success(requireFileService().writeChunk(path, data, append))
+                        Log.i(
+                            "SolidLeafFS",
+                            "fsWriteChunk mode=${fsModeLabel()} path=$path append=$append bytes=${data.size}",
+                        )
+                        result.success(fsWriteChunk(path, data, append))
                     } catch (e: Exception) {
-                        result.error("FS_ERROR", e.message, null)
+                        Log.e("SolidLeafFS", "fsWriteChunk failed path=$path", e)
+                        result.error(
+                            "FS_ERROR",
+                            "${e.javaClass.simpleName}: ${e.message} | mode=${fsModeLabel()} path=$path append=$append bytes=${data.size}",
+                            null,
+                        )
+                    }
+                }
+                "fsCopyFile" -> {
+                    val args = call.arguments as? Map<*, *>
+                    val src = args?.get("src") as? String ?: ""
+                    val dst = args?.get("dst") as? String ?: ""
+                    try {
+                        Log.i("SolidLeafFS", "fsCopyFile mode=${fsModeLabel()} $src -> $dst")
+                        result.success(fsCopyFile(src, dst))
+                    } catch (e: Exception) {
+                        Log.e("SolidLeafFS", "fsCopyFile failed $src -> $dst", e)
+                        result.error(
+                            "FS_ERROR",
+                            "${e.javaClass.simpleName}: ${e.message} | mode=${fsModeLabel()} src=$src dst=$dst",
+                            null,
+                        )
                     }
                 }
                 "fsReadChunk" -> {
@@ -218,7 +275,7 @@ class MainActivity : FlutterActivity() {
                     val offset = (args?.get("offset") as? Number)?.toLong() ?: 0L
                     val length = (args?.get("length") as? Number)?.toInt() ?: 0
                     try {
-                        result.success(requireFileService().readChunk(path, offset, length))
+                        result.success(fsReadChunk(path, offset, length))
                     } catch (e: Exception) {
                         result.error("FS_ERROR", e.message, null)
                     }
@@ -226,7 +283,7 @@ class MainActivity : FlutterActivity() {
                 "fsFileSize" -> {
                     val path = call.arguments as? String ?: ""
                     try {
-                        result.success(requireFileService().fileSize(path))
+                        result.success(fsFileSize(path))
                     } catch (e: Exception) {
                         result.error("FS_ERROR", e.message, null)
                     }
@@ -234,7 +291,7 @@ class MainActivity : FlutterActivity() {
                 "fsDeleteRecursive" -> {
                     val path = call.arguments as? String ?: ""
                     try {
-                        result.success(requireFileService().deleteRecursive(path))
+                        result.success(fsDeleteRecursive(path))
                     } catch (e: Exception) {
                         result.error("FS_ERROR", e.message, null)
                     }
@@ -242,7 +299,7 @@ class MainActivity : FlutterActivity() {
                 "fsExists" -> {
                     val path = call.arguments as? String ?: ""
                     try {
-                        result.success(requireFileService().exists(path))
+                        result.success(fsExists(path))
                     } catch (e: Exception) {
                         result.error("FS_ERROR", e.message, null)
                     }
@@ -250,18 +307,7 @@ class MainActivity : FlutterActivity() {
                 "fsIsDirectory" -> {
                     val path = call.arguments as? String ?: ""
                     try {
-                        result.success(requireFileService().isDirectory(path))
-                    } catch (e: Exception) {
-                        result.error("FS_ERROR", e.message, null)
-                    }
-                }
-                "fsCopyFile" -> {
-                    // Локальное копирование в shell-процессе (без Binder-чанков).
-                    val args = call.arguments as? Map<*, *>
-                    val src = args?.get("src") as? String ?: ""
-                    val dst = args?.get("dst") as? String ?: ""
-                    try {
-                        result.success(requireFileService().copyFile(src, dst))
+                        result.success(fsIsDirectory(path))
                     } catch (e: Exception) {
                         result.error("FS_ERROR", e.message, null)
                     }
@@ -269,52 +315,15 @@ class MainActivity : FlutterActivity() {
                 "fsListRelativeFiles" -> {
                     val path = call.arguments as? String ?: ""
                     try {
-                        result.success(requireFileService().listRelativeFiles(path))
+                        result.success(fsListRelativeFiles(path))
                     } catch (e: Exception) {
                         result.error("FS_ERROR", e.message, null)
                     }
                 }
                 "fsProbeWrite" -> {
-                    // Быстрая проверка записи в Android/data до полной установки.
                     val path = call.arguments as? String ?: ""
                     try {
-                        val svc = requireFileService()
-                        val probe = if (path.endsWith("/")) {
-                            path + ".solidleaf_write_probe"
-                        } else {
-                            "$path/.solidleaf_write_probe"
-                        }
-                        val parentOk = svc.mkdirs(
-                            probe.substringBeforeLast('/', missingDelimiterValue = path),
-                        )
-                        if (!parentOk && !svc.exists(
-                                probe.substringBeforeLast('/', missingDelimiterValue = path),
-                            )
-                        ) {
-                            result.success(
-                                mapOf(
-                                    "ok" to false,
-                                    "stage" to "mkdirs",
-                                    "path" to probe,
-                                    "error" to "cannot create parent directory",
-                                ),
-                            )
-                            return@setMethodCallHandler
-                        }
-                        val payload = "ok".toByteArray(Charsets.UTF_8)
-                        val wrote = svc.writeChunk(probe, payload, false)
-                        val size = svc.fileSize(probe)
-                        svc.deleteRecursive(probe)
-                        val ok = wrote && size >= payload.size
-                        result.success(
-                            mapOf(
-                                "ok" to ok,
-                                "stage" to if (ok) "write" else "verify",
-                                "path" to probe,
-                                "size" to size,
-                                "error" to if (ok) null else "write/verify failed",
-                            ),
-                        )
+                        result.success(fsProbeWrite(path))
                     } catch (e: Exception) {
                         result.error("FS_ERROR", e.message, null)
                     }
@@ -322,6 +331,77 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    private fun fsModeLabel(): String =
+        if (useProcessFsFallback) "process" else "userservice"
+
+    private fun fsMkdirs(path: String): Boolean =
+        if (useProcessFsFallback) ShizukuProcessFs.mkdirs(path)
+        else requireFileService().mkdirs(path)
+
+    private fun fsWriteChunk(path: String, data: ByteArray, append: Boolean): Boolean =
+        if (useProcessFsFallback) ShizukuProcessFs.writeChunk(path, data, append)
+        else requireFileService().writeChunk(path, data, append)
+
+    private fun fsCopyFile(src: String, dst: String): Boolean =
+        if (useProcessFsFallback) ShizukuProcessFs.copyFile(src, dst)
+        else requireFileService().copyFile(src, dst)
+
+    private fun fsReadChunk(path: String, offset: Long, length: Int): ByteArray? =
+        if (useProcessFsFallback) ShizukuProcessFs.readChunk(path, offset, length)
+        else requireFileService().readChunk(path, offset, length)
+
+    private fun fsFileSize(path: String): Long =
+        if (useProcessFsFallback) ShizukuProcessFs.fileSize(path)
+        else requireFileService().fileSize(path)
+
+    private fun fsDeleteRecursive(path: String): Boolean =
+        if (useProcessFsFallback) ShizukuProcessFs.deleteRecursive(path)
+        else requireFileService().deleteRecursive(path)
+
+    private fun fsExists(path: String): Boolean =
+        if (useProcessFsFallback) ShizukuProcessFs.exists(path)
+        else requireFileService().exists(path)
+
+    private fun fsIsDirectory(path: String): Boolean =
+        if (useProcessFsFallback) ShizukuProcessFs.isDirectory(path)
+        else requireFileService().isDirectory(path)
+
+    private fun fsListRelativeFiles(path: String): String =
+        if (useProcessFsFallback) ShizukuProcessFs.listRelativeFiles(path)
+        else requireFileService().listRelativeFiles(path)
+
+    private fun fsProbeWrite(path: String): Map<String, Any?> {
+        val probe = if (path.endsWith("/")) {
+            path + ".solidleaf_write_probe"
+        } else {
+            "$path/.solidleaf_write_probe"
+        }
+        val parent = probe.substringBeforeLast('/', missingDelimiterValue = path)
+        val parentOk = fsMkdirs(parent)
+        if (!parentOk && !fsExists(parent)) {
+            return mapOf(
+                "ok" to false,
+                "stage" to "mkdirs",
+                "path" to probe,
+                "mode" to fsModeLabel(),
+                "error" to "cannot create parent directory",
+            )
+        }
+        val payload = "ok".toByteArray(Charsets.UTF_8)
+        val wrote = fsWriteChunk(probe, payload, false)
+        val size = fsFileSize(probe)
+        fsDeleteRecursive(probe)
+        val ok = wrote && size >= payload.size
+        return mapOf(
+            "ok" to ok,
+            "stage" to if (ok) "write" else "verify",
+            "path" to probe,
+            "size" to size,
+            "mode" to fsModeLabel(),
+            "error" to if (ok) null else "write/verify failed",
+        )
     }
 
     private fun ensureShizukuListeners() {
@@ -353,17 +433,30 @@ class MainActivity : FlutterActivity() {
         if (error != null) {
             pending.error("SERVICE_BIND_FAILED", error, null)
         } else {
-            pending.success(success)
+            useProcessFsFallback = false
+            // Map: Flutter понимает и bool, и {ok, mode}.
+            pending.success(
+                mapOf(
+                    "ok" to true,
+                    "mode" to "userservice",
+                ),
+            )
         }
     }
 
     private fun ensureFileService(result: MethodChannel.Result) {
         val current = fileService
         if (current != null && current.asBinder().pingBinder()) {
-            result.success(true)
+            useProcessFsFallback = false
+            result.success(mapOf("ok" to true, "mode" to "userservice"))
             return
         }
         fileService = null
+
+        if (useProcessFsFallback && ShizukuProcessFs.probeAlive()) {
+            result.success(mapOf("ok" to true, "mode" to "process"))
+            return
+        }
 
         if (pendingServiceResult != null) {
             result.error("SERVICE_BIND_IN_PROGRESS", "Shizuku file service is already connecting", null)
@@ -386,6 +479,7 @@ class MainActivity : FlutterActivity() {
 
         pendingServiceResult = result
         serviceBindAttempt = 0
+        bindProfile = 0
         startFileServiceBindAttempt()
     }
 
@@ -420,13 +514,13 @@ class MainActivity : FlutterActivity() {
         if (attempt > 1) {
             val forceRemove = attempt >= SERVICE_BIND_MAX_ATTEMPTS
             try {
-                Shizuku.unbindUserService(userServiceArgs, fileServiceConnection, forceRemove)
+                Shizuku.unbindUserService(activeUserServiceArgs(), fileServiceConnection, forceRemove)
             } catch (_: Exception) {
             }
         }
 
         try {
-            Shizuku.bindUserService(userServiceArgs, fileServiceConnection)
+            Shizuku.bindUserService(activeUserServiceArgs(), fileServiceConnection)
         } catch (e: Exception) {
             handleFileServiceBindFailure(
                 e.message ?: "bindUserService failed (attempt $attempt/$SERVICE_BIND_MAX_ATTEMPTS)"
@@ -440,7 +534,7 @@ class MainActivity : FlutterActivity() {
         pendingServiceTimeout = null
 
         if (serviceBindAttempt < SERVICE_BIND_MAX_ATTEMPTS) {
-            val delay = SERVICE_BIND_RETRY_DELAY_MS + (serviceBindAttempt - 1) * 400L
+            val delay = SERVICE_BIND_RETRY_DELAY_MS + (serviceBindAttempt - 1) * 300L
             pendingServiceRetry = Runnable {
                 if (pendingServiceResult === pending) {
                     val state = getShizukuState()
@@ -455,12 +549,46 @@ class MainActivity : FlutterActivity() {
             return
         }
 
+        // Второй профиль: daemon(false) — на части HyperOS daemon(true) молчит.
+        if (bindProfile == 0) {
+            Log.w("SolidLeafShizuku", "UserService daemon profile failed, retry nodaemon: $reason")
+            bindProfile = 1
+            serviceBindAttempt = 0
+            pendingServiceRetry = Runnable {
+                if (pendingServiceResult === pending) {
+                    startFileServiceBindAttempt()
+                }
+            }
+            mainHandler.postDelayed(pendingServiceRetry!!, 800L)
+            return
+        }
+
+        // Fallback: Shizuku.newProcess (лог пользователя: UserService timeout ~4 мин).
+        Log.w("SolidLeafShizuku", "UserService unavailable, trying process FS: $reason")
+        if (ShizukuProcessFs.probeAlive()) {
+            useProcessFsFallback = true
+            pendingServiceTimeout?.let { mainHandler.removeCallbacks(it) }
+            pendingServiceRetry?.let { mainHandler.removeCallbacks(it) }
+            pendingServiceTimeout = null
+            pendingServiceRetry = null
+            pendingServiceResult = null
+            serviceBindAttempt = 0
+            pending.success(
+                mapOf(
+                    "ok" to true,
+                    "mode" to "process",
+                    "warning" to reason,
+                ),
+            )
+            return
+        }
+
         completePendingServiceResult(
             false,
-            "$reason. Shizuku «активен», но file service не подключился. "
-                + "На HyperOS / Redmi / Infinix: Stop→Start в Shizuku, батарея "
-                + "«без ограничений» для Shizuku и SolidLeaf, снова разрешите "
-                + "доступ и повторите (не сворачивайте лаунчер).",
+            "$reason. Shizuku «активен», но file service не подключился, "
+                + "и process-fallback тоже недоступен. "
+                + "На HyperOS / Redmi: Stop→Start в Shizuku, батарея "
+                + "«без ограничений» для Shizuku и SolidLeaf.",
         )
     }
 
@@ -481,12 +609,27 @@ class MainActivity : FlutterActivity() {
             }
 
         fun toMap(): Map<String, Any> {
+            var uid = -1
+            var apiVersion = -1
+            var preV11 = true
+            try {
+                if (binderAlive) {
+                    uid = Shizuku.getUid()
+                    apiVersion = Shizuku.getVersion()
+                    preV11 = Shizuku.isPreV11()
+                }
+            } catch (e: Exception) {
+                Log.w("SolidLeafShizuku", "uid/version read failed", e)
+            }
             return mapOf(
                 "installed" to installed,
                 "binderAlive" to binderAlive,
                 "hasPermission" to hasPermission,
                 "active" to isReady,
-                "status" to humanStatus
+                "status" to humanStatus,
+                "uid" to uid,
+                "apiVersion" to apiVersion,
+                "preV11" to preV11,
             )
         }
     }
@@ -562,7 +705,7 @@ class MainActivity : FlutterActivity() {
             // remove=false: не убиваем процесс сервиса при повороте/пересоздании Activity.
             // Иначе на HyperOS следующий bind часто зависает до полного рестарта Shizuku.
             if (fileService != null) {
-                Shizuku.unbindUserService(userServiceArgs, fileServiceConnection, false)
+                Shizuku.unbindUserService(activeUserServiceArgs(), fileServiceConnection, false)
             }
         } catch (_: Exception) {
         }

@@ -79,19 +79,30 @@ UserFacingError describeInstallErrorDetailed(
   if (error is UserFacingError) return error;
 
   if (error is PatchInstallException) {
+    // Не схлопываем переносы — в сообщении может быть диагностика Shizuku.
+    final summary = error.message
+        .replaceFirst(RegExp(r'^(Exception|Error):\s*', caseSensitive: false), '')
+        .trim();
+    final hasDiag = summary.contains('—— диагностика');
     return UserFacingError(
       title: error.needsAdmin ? 'Нужны права доступа' : 'Не удалось установить',
-      summary: sanitizeUserErrorText(error.message),
+      summary: summary,
       steps: error.needsAdmin
           ? const [
               'Закройте игру Reverse: 1999',
               'Запустите лаунчер от имени администратора',
               'Повторите установку',
             ]
-          : const [
-              'Проверьте интернет и повторите попытку',
-              'Убедитесь, что путь к игре указан верно',
-            ],
+          : hasDiag
+              ? const [
+                  'Скопируйте текст ошибки и пришлите разработчику',
+                  'На HyperOS: Stop→Start в Shizuku, батарея без ограничений',
+                  'Повторите установку, не сворачивая лаунчер',
+                ]
+              : const [
+                  'Проверьте интернет и повторите попытку',
+                  'Убедитесь, что путь к игре указан верно',
+                ],
     );
   }
 

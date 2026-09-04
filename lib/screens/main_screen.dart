@@ -505,6 +505,8 @@ class _MainScreenState extends State<MainScreen>
   /// Диалог ошибки установки — без сырых Exception / стеков.
   Future<void> _showInstallErrorDialog(UserFacingError error) async {
     if (!mounted) return;
+    final controller = context.read<LauncherController>();
+    final diag = controller.lastShizukuInstallDiag;
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -526,56 +528,79 @@ class _MainScreenState extends State<MainScreen>
             ),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              error.summary,
-              style: TextStyle(
-                color: Theme.of(context).textTheme.bodySmall?.color,
-                height: 1.4,
-              ),
-            ),
-            if (error.steps.isNotEmpty) ...[
-              const SizedBox(height: 14),
-              Text(
-                'Что сделать',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  color: Theme.of(context).textTheme.bodyMedium?.color,
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SelectableText(
+                  error.summary,
+                  style: TextStyle(
+                    color: Theme.of(context).textTheme.bodySmall?.color,
+                    height: 1.4,
+                    fontSize: 13,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              for (var i = 0; i < error.steps.length; i++) ...[
-                if (i > 0) const SizedBox(height: 6),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '${i + 1}.',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
+                if (error.steps.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  Text(
+                    'Что сделать',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: Theme.of(context).textTheme.bodyMedium?.color,
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        error.steps[i],
-                        style: TextStyle(
-                          color: Theme.of(context).textTheme.bodySmall?.color,
-                          height: 1.35,
+                  ),
+                  const SizedBox(height: 8),
+                  for (var i = 0; i < error.steps.length; i++) ...[
+                    if (i > 0) const SizedBox(height: 6),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${i + 1}.',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
                         ),
-                      ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            error.steps[i],
+                            style: TextStyle(
+                              color:
+                                  Theme.of(context).textTheme.bodySmall?.color,
+                              height: 1.35,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
-                ),
+                ],
               ],
-            ],
-          ],
+            ),
+          ),
         ),
         actions: [
+          if (diag.isNotEmpty || error.summary.contains('[DIAG'))
+            TextButton(
+              onPressed: () async {
+                final text = diag.isNotEmpty ? diag : error.summary;
+                await Clipboard.setData(ClipboardData(text: text));
+                if (ctx.mounted) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(
+                      content: Text('Диагностика скопирована'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              },
+              child: const Text('Копировать лог'),
+            ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
             child: const Text('Понятно'),

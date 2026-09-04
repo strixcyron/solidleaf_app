@@ -786,10 +786,61 @@ class LauncherController extends ChangeNotifier {
 
   void addLog(String message) {
     logs.add(message);
-    if (logs.length > 20) {
+    // Временно больше строк — для диагностики Shizuku на HyperOS.
+    if (logs.length > 80) {
       logs.removeAt(0);
     }
     notifyListeners();
+  }
+
+  /// Временный расширенный лог установки через Shizuku (можно выключить).
+  static const bool shizukuInstallDiagEnabled = true;
+
+  final List<String> _installDiagLines = [];
+
+  /// Последний дамп диагностики (для диалога ошибки / копирования).
+  String lastShizukuInstallDiag = '';
+
+  void _diagClear() {
+    _installDiagLines.clear();
+    lastShizukuInstallDiag = '';
+  }
+
+  void _diag(String message) {
+    if (!shizukuInstallDiagEnabled) return;
+    final ts = DateTime.now().toIso8601String().substring(11, 19);
+    final line = '[DIAG $ts] $message';
+    _installDiagLines.add(line);
+    addLog(line);
+  }
+
+  String _diagDump({int maxLines = 40}) {
+    if (_installDiagLines.isEmpty) return '';
+    final start = _installDiagLines.length > maxLines
+        ? _installDiagLines.length - maxLines
+        : 0;
+    return _installDiagLines.sublist(start).join('\n');
+  }
+
+  Future<void> _diagLogEnvironment() async {
+    if (!Platform.isAndroid || !shizukuInstallDiagEnabled) return;
+    const methodChannel = MethodChannel(shizukuChannel);
+    try {
+      final device = await methodChannel.invokeMethod<dynamic>('getDeviceInfo');
+      _diag('device=$device');
+    } catch (e) {
+      _diag('getDeviceInfo failed: $e');
+    }
+    try {
+      final state = await methodChannel.invokeMethod<dynamic>('getShizukuState');
+      _diag('shizukuState=$state');
+    } catch (e) {
+      _diag('getShizukuState failed: $e');
+    }
+    _diag(
+      'installPath=$installPath | normalized=${_normalizedInstallPath()} | '
+      'isShizukuActive=$isShizukuActive',
+    );
   }
 
   static const List<String> _backupFilesWindows = [
@@ -862,19 +913,32 @@ class LauncherController extends ChangeNotifier {
 
   String? _activeShellStagingDir;
 
-  Future<void> _ensureFileService({int attempts = 4}) async {
+  /// Native: UserService → (HyperOS) process via Shizuku.newProcess.
+  /// attempts низкий: ретраи уже на стороне Android.
+  Future<void> _ensureFileService({int attempts = 2}) async {
     const methodChannel = MethodChannel(shizukuChannel);
     String? lastErrorMessage;
 
     for (var attempt = 1; attempt <= attempts; attempt++) {
       try {
-        final ok =
-            await methodChannel.invokeMethod<bool>('ensureFileService') ??
-            false;
+        final raw =
+            await methodChannel.invokeMethod<dynamic>('ensureFileService');
+        final ok = raw == true || (raw is Map && raw['ok'] == true);
+        final mode = raw is Map
+            ? raw['mode']?.toString()
+            : (ok ? 'userservice' : null);
         if (ok) {
+          _diag('ensureFileService OK mode=${mode ?? "?"}');
+          if (mode == 'process') {
+            addLog(
+              'Shizuku: запись через shell-process (UserService недоступен)',
+            );
+          }
           if (statusText.startsWith('Shizuku не подключён') ||
               statusText.startsWith('Подключение к Shizuku')) {
-            statusText = 'Shizuku: сервис доступен';
+            statusText = mode == 'process'
+                ? 'Shizuku: process FS'
+                : 'Shizuku: сервис доступен';
             notifyListeners();
           }
           return;
@@ -925,12 +989,15 @@ class LauncherController extends ChangeNotifier {
         targetRoot,
       );
       if (raw is Map && raw['ok'] == true) {
-        addLog('Проверка записи Shizuku: OK ($targetRoot)');
+        final mode = raw['mode']?.toString() ?? '?';
+        addLog('Проверка записи Shizuku: OK mode=$mode ($targetRoot)');
+        _diag('fsProbeWrite OK mode=$mode path=$targetRoot');
         return;
       }
       final stage = raw is Map ? raw['stage'] : null;
       final err = raw is Map ? raw['error'] : null;
-      throw Exception('probe failed stage=$stage error=$err');
+      final mode = raw is Map ? raw['mode'] : null;
+      throw Exception('probe failed mode=$mode stage=$stage error=$err');
     } on PlatformException catch (e) {
       if (!throwOnFail) rethrow;
       throw PatchInstallException(
@@ -1224,39 +1291,54 @@ class LauncherController extends ChangeNotifier {
     if (await _fsExists(dstPath)) {
       final deleted = await _fsDeleteRecursive(dstPath);
       if (!deleted && await _fsExists(dstPath)) {
-        addLog('Предупреждение: не удалось удалить перед записью: $dstPath');
+        _diag('не удалось удалить перед записью: $dstPath');
       }
     }
 
+    final srcPath = localFile.path;
+    final srcSize = await localFile.length();
+    _diag(
+      'write file src=$srcPath (${srcSize}B) -> $dstPath | '
+      'shellReadable=${_isShellReadablePath(srcPath)}',
+    );
+
     // 1) Быстрый путь (большинство устройств): прямой copyFile, если shell
     //    читает источник (shared storage).
-    if (_isShellReadablePath(localFile.path)) {
+    if (_isShellReadablePath(srcPath)) {
       try {
-        await _fsCopyFileNative(localFile.path, dstPath);
+        await _fsCopyFileNative(srcPath, dstPath);
+        _diag('OK strategy=direct_copyFile ${path.basename(dstPath)}');
         return;
       } catch (e) {
-        addLog(
-          'Прямой copyFile для ${path.basename(dstPath)} не удался '
-          '(часто HyperOS не читает Android/data лаунчера): $e',
-        );
+        _diag('FAIL strategy=direct_copyFile: $e');
       }
+    } else {
+      _diag('skip direct_copyFile (src не на shared storage)');
     }
 
     // 2) HyperOS/ZArchiver-путь: сначала на /sdcard, потом copyFile в игру.
     final staged = await _stageLocalFileOnPublicSdcard(localFile);
     if (staged != null) {
+      _diag('staging OK -> $staged');
       try {
         await _fsCopyFileNative(staged, dstPath);
+        _diag('OK strategy=sdcard_staging_copyFile ${path.basename(dstPath)}');
         return;
       } catch (e) {
-        addLog(
-          'copyFile со staging ${path.basename(dstPath)} не удался: $e',
-        );
+        _diag('FAIL strategy=sdcard_staging_copyFile: $e');
       }
+    } else {
+      _diag('FAIL strategy=sdcard_staging (не удалось положить файл на /sdcard)');
     }
 
     // 3) Запасной путь: чанки напрямую в целевой файл.
-    await _writeLocalFileViaChunks(localFile, dstPath);
+    try {
+      await _writeLocalFileViaChunks(localFile, dstPath);
+      _diag('OK strategy=direct_chunks ${path.basename(dstPath)}');
+    } catch (e) {
+      _diag('FAIL strategy=direct_chunks: $e');
+      rethrow;
+    }
   }
 
   /// Кладёт файл в /sdcard/SolidLeaf_staging через shell writeChunk.
@@ -2579,26 +2661,53 @@ class LauncherController extends ChangeNotifier {
     String archiveKind = 'text',
   }) async {
     if (Platform.isAndroid) {
+      _diagClear();
+      _diag('=== начало установки Android archiveKind=$archiveKind ===');
+      _diag('zipPath=$zipPath');
+      try {
+        _diag('zipSize=${await File(zipPath).length()}B');
+      } catch (e) {
+        _diag('zipSize read failed: $e');
+      }
+      await _diagLogEnvironment();
+
       if (!isShizukuActive) {
+        _diag('ABORT: isShizukuActive=false');
         addLog('Shizuku не активен — установка на Android невозможна');
+        lastShizukuInstallDiag = _diagDump();
         throw PatchInstallException(
-          'Shizuku не запущен. Откройте Shizuku, нажмите Start и повторите.',
+          'Shizuku не запущен. Откройте Shizuku, нажмите Start и повторите.\n\n'
+          '$lastShizukuInstallDiag',
         );
       }
       await _ensureShizukuPermission();
+      await _diagLogEnvironment();
       if (!isShizukuActive) {
+        _diag('ABORT: нет permission после request');
+        lastShizukuInstallDiag = _diagDump();
         throw PatchInstallException(
-          'Нет разрешения Shizuku. Откройте Shizuku → разрешите доступ SolidLeaf.',
+          'Нет разрешения Shizuku. Откройте Shizuku → разрешите доступ SolidLeaf.\n\n'
+          '$lastShizukuInstallDiag',
         );
       }
       await _resolveAndroidGameInstallPath();
-      await _ensureFileService();
+      _diag('после resolveGamePath installPath=$installPath');
+      try {
+        // diag mode=userservice|process пишется внутри _ensureFileService
+        await _ensureFileService();
+      } catch (e) {
+        _diag('ABORT ensureFileService: $e');
+        lastShizukuInstallDiag = _diagDump();
+        throw PatchInstallException(
+          'Не удалось подключить Shizuku file service.\n$e\n\n$lastShizukuInstallDiag',
+        );
+      }
 
       // Распаковка во временную папку приложения; в игру файлы уйдут через
       // shell: прямой copyFile → /sdcard staging → чанки.
       final stagingRoot =
           await getExternalStorageDirectory() ?? await getTemporaryDirectory();
-      addLog('Временная распаковка архива: ${stagingRoot.path}');
+      _diag('appExtractRoot=${stagingRoot.path}');
 
       final workDir = Directory(
         path.join(
@@ -2617,6 +2726,7 @@ class LauncherController extends ChangeNotifier {
         final archiveFile = File(zipPath);
         final bytes = await archiveFile.readAsBytes();
         final archive = ZipDecoder().decodeBytes(bytes);
+        _diag('zipEntries=${archive.length}');
 
         for (final file in archive) {
           final outPath = path.join(workDir.path, file.name);
@@ -2632,7 +2742,9 @@ class LauncherController extends ChangeNotifier {
 
         final preferredRoot =
             path.normalize(installPath.isNotEmpty ? installPath : targetDir);
+        _diag('preferredRoot=$preferredRoot');
         final dataRoot = await _pickWritableAndroidDataRoot(preferredRoot);
+        _diag('pickedDataRoot=$dataRoot');
         if (dataRoot != installPath) {
           installPath = dataRoot;
           _refreshInstallPathState();
@@ -2657,6 +2769,9 @@ class LauncherController extends ChangeNotifier {
         if (luabytesDir != null) {
           sourceDir = path.normalize(luabytesDir.parent.path);
           finalTarget = path.join(dataRoot, 'files', 'ResLib', 'Android');
+          _diag('luabytes найден → sourceDir=$sourceDir finalTarget=$finalTarget');
+        } else {
+          _diag('luabytes НЕ найден — копируем в корень dataRoot');
         }
 
         sourceDir = path.normalize(sourceDir);
@@ -2669,25 +2784,34 @@ class LauncherController extends ChangeNotifier {
                   .whereType<File>()
                   .toList()
             : <File>[];
+        _diag('filesToCopy=${allFiles.length}');
+        if (allFiles.isNotEmpty) {
+          final sample = allFiles
+              .take(3)
+              .map((f) => path.relative(f.path, from: sourceDir))
+              .join(' | ');
+          _diag('sampleRel=$sample');
+        }
 
         final mkOk = await _fsMkdirs(finalTarget);
+        _diag('mkdirs($finalTarget)=$mkOk');
         if (!mkOk) {
+          lastShizukuInstallDiag = _diagDump();
           throw PatchInstallException(
             'Shizuku запущен, но нельзя создать папку в данных игры:\n'
             '$finalTarget\n'
             'На HyperOS / Redmi / Infinix отключите оптимизацию батареи для '
-            'Shizuku и SolidLeaf, Stop→Start в Shizuku и повторите.',
+            'Shizuku и SolidLeaf, Stop→Start в Shizuku и повторите.\n\n'
+            '—— диагностика ——\n$lastShizukuInstallDiag',
           );
         }
 
         // Мягкая проверка: на части HyperOS probe ложно падает, а copy работает.
         try {
           await _probeAndroidWriteAccess(finalTarget);
+          _diag('probeWrite OK');
         } catch (e) {
-          addLog(
-            'Предупреждение probe записи ($e) — продолжаем установку '
-            '(режим /sdcard staging → copyFile).',
-          );
+          _diag('probeWrite WARN (продолжаем): $e');
         }
 
         await _backupOnlyOverwrittenFiles(
@@ -2696,13 +2820,11 @@ class LauncherController extends ChangeNotifier {
           allFiles,
           kind: archiveKind,
         );
+        _diag('backup phase done lastBackupFiles=${lastBackupFiles.length}');
 
         _activeShellStagingDir =
             '$_publicShellStagingRoot/install_${archiveKind}_${DateTime.now().millisecondsSinceEpoch}';
-        addLog(
-          'Копирование ${allFiles.length} файлов: '
-          'staging /sdcard → Android/data (как ZArchiver)...',
-        );
+        _diag('publicStagingDir=$_activeShellStagingDir');
 
         int copied = 0;
         String? firstError;
@@ -2714,33 +2836,50 @@ class LauncherController extends ChangeNotifier {
             copied++;
           } catch (e) {
             firstError ??= e.toString();
+            _diag('COPY FAIL $rel: $e');
             addLog('Не удалось скопировать ${f.path} -> $dst: ${e.toString()}');
           }
         }
 
+        _diag('copied=$copied / ${allFiles.length}');
         if (allFiles.isNotEmpty && copied < allFiles.length) {
+          lastShizukuInstallDiag = _diagDump();
           throw PatchInstallException(
             'Скопировано $copied из ${allFiles.length} файлов через Shizuku'
             '${firstError != null ? '.\nПричина: $firstError' : '.'}\n'
             'Оболочка (HyperOS / Redmi / Infinix) часто режет запись в '
             'Android/data. Stop→Start в Shizuku, батарея без ограничений '
-            'для Shizuku и SolidLeaf, закройте игру и повторите.',
+            'для Shizuku и SolidLeaf, закройте игру и повторите.\n\n'
+            '—— диагностика (пришлите разработчику) ——\n'
+            '$lastShizukuInstallDiag',
           );
         }
 
         final validated = await _fsExists(finalTarget);
+        _diag('validate exists($finalTarget)=$validated');
         if (!validated) {
+          lastShizukuInstallDiag = _diagDump();
           throw Exception(
-            'После копирования целевая папка не найдена: $finalTarget',
+            'После копирования целевая папка не найдена: $finalTarget\n\n'
+            '$lastShizukuInstallDiag',
           );
         }
 
         lastInstallSource = sourceDir;
         lastInstallTarget = finalTarget;
         lastInstallFileCount = copied;
+        _diag('=== установка OK files=$copied ===');
+        lastShizukuInstallDiag = _diagDump();
       } catch (e) {
+        _diag('EXCEPTION: $e');
+        lastShizukuInstallDiag = _diagDump();
         addLog('Ошибка распаковки/копирования архива: ${e.toString()}');
-        rethrow;
+        if (e is PatchInstallException) rethrow;
+        throw PatchInstallException(
+          '${describeInstallError(e, pathHint: targetDir)}\n\n'
+          '—— диагностика (пришлите разработчику) ——\n'
+          '$lastShizukuInstallDiag',
+        );
       } finally {
         await _cleanupPublicShellStaging();
         try {
