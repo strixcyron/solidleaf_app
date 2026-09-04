@@ -104,12 +104,16 @@ class LocalizationLauncher extends StatelessWidget {
           theme: AppTheme.light(
             preset: controller.themePreset,
             coverAccent: controller.coverAccent,
+            coverSecondary: controller.coverSecondary,
+            coverMuted: controller.coverMuted,
             customAccent: controller.customAccent,
             dynamicScheme: useDynamic ? lightDynamic.harmonized() : null,
           ),
           darkTheme: AppTheme.dark(
             preset: controller.themePreset,
             coverAccent: controller.coverAccent,
+            coverSecondary: controller.coverSecondary,
+            coverMuted: controller.coverMuted,
             customAccent: controller.customAccent,
             dynamicScheme: useDynamic ? darkDynamic?.harmonized() : null,
           ),
@@ -129,10 +133,11 @@ class LocalizationLauncher extends StatelessWidget {
     );
   }
 
-  /// Пресеты с фиксированной яркостью управляют темой сами; «из обложки»
+  /// Пресеты с фиксированной яркостью управляют темой сами; «Из баннера»
   /// и Material You уважают переключатель светлая/тёмная.
   ThemeMode _resolveThemeMode(LauncherController controller) {
-    if (controller.dynamicColorEnabled) {
+    if (controller.dynamicColorEnabled &&
+        controller.themePreset != AppThemePreset.dynamicCover) {
       return controller.isDarkMode ? ThemeMode.dark : ThemeMode.light;
     }
     final brightness = AppTheme.effectiveBrightness(

@@ -50,7 +50,6 @@ class FileTransferUserService : IFileTransferService.Stub {
                 if (append) {
                     throw primary
                 }
-                // Запасной путь: tmp + rename — обходит блокировки truncate/open.
                 Log.w(TAG, "writeChunk primary failed, trying tmp+rename: $path", primary)
                 writeViaTempRename(file, data)
                 return true
@@ -62,6 +61,155 @@ class FileTransferUserService : IFileTransferService.Stub {
                 e,
             )
         }
+    }
+
+    /**
+     * Копирование файл→файл целиком в процессе shell (паттерн ZArchiver/MT).
+     * Источник должен быть читаем shell (например staging в Android/data нашего
+     * приложения или уже лежащий в Android/data игры файл для бэкапа).
+     */
+    override fun copyFile(src: String, dst: String): Boolean {
+        try {
+            val source = File(src)
+            val target = File(dst)
+            if (!source.exists() || !source.isFile) {
+                throw IllegalStateException("source missing or not a file: $src")
+            }
+            target.parentFile?.let { ensureDirectory(it) }
+            if (target.exists()) {
+                prepareForOverwrite(target)
+            }
+
+            try {
+                streamCopy(source, target)
+            } catch (primary: Exception) {
+                Log.w(TAG, "copyFile direct failed, tmp+rename: $src -> $dst", primary)
+                try {
+                    copyViaTempFile(source, target)
+                } catch (secondary: Exception) {
+                    Log.w(TAG, "copyFile tmp failed, toybox cp: $src -> $dst", secondary)
+                    copyViaExec(source, target)
+                }
+            }
+
+            if (!target.exists()) {
+                throw IllegalStateException("target missing after copy: $dst")
+            }
+            if (target.length() != source.length()) {
+                throw IllegalStateException(
+                    "size mismatch after copy: src=${source.length()} dst=${target.length()}",
+                )
+            }
+            return true
+        } catch (e: Exception) {
+            Log.e(TAG, "copyFile failed: $src -> $dst", e)
+            throw RuntimeException(
+                "copyFile: ${e.javaClass.simpleName}: ${e.message ?: "unknown"} ($src -> $dst)",
+                e,
+            )
+        }
+    }
+
+    override fun listRelativeFiles(rootDir: String): String {
+        return try {
+            val root = File(rootDir)
+            if (!root.exists() || !root.isDirectory) {
+                return ""
+            }
+            val rootPath = root.canonicalPath
+            val out = StringBuilder()
+            root.walkTopDown().forEach { file ->
+                if (!file.isFile) return@forEach
+                val full = try {
+                    file.canonicalPath
+                } catch (_: Exception) {
+                    file.absolutePath
+                }
+                if (!full.startsWith(rootPath)) return@forEach
+                var rel = full.substring(rootPath.length)
+                if (rel.startsWith("/") || rel.startsWith("\\")) {
+                    rel = rel.substring(1)
+                }
+                if (rel.isEmpty()) return@forEach
+                if (out.isNotEmpty()) out.append('\n')
+                out.append(rel.replace('\\', '/'))
+            }
+            out.toString()
+        } catch (e: Exception) {
+            Log.w(TAG, "listRelativeFiles failed: $rootDir", e)
+            throw RuntimeException(
+                "listRelativeFiles: ${e.javaClass.simpleName}: ${e.message ?: "unknown"} @ $rootDir",
+                e,
+            )
+        }
+    }
+
+    private fun streamCopy(source: File, target: File) {
+        FileInputStream(source).use { input ->
+            FileOutputStream(target, false).use { output ->
+                val buffer = ByteArray(256 * 1024)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read <= 0) break
+                    output.write(buffer, 0, read)
+                }
+                try {
+                    output.fd.sync()
+                } catch (_: Exception) {
+                }
+            }
+        }
+    }
+
+    private fun copyViaTempFile(source: File, target: File) {
+        val parent = target.parentFile
+            ?: throw IllegalStateException("no parent for ${target.path}")
+        ensureDirectory(parent)
+        val tmp = File(parent, "${target.name}.solidleaf.tmp")
+        if (tmp.exists()) {
+            prepareForOverwrite(tmp)
+            tmp.delete()
+        }
+        try {
+            streamCopy(source, tmp)
+            if (target.exists()) {
+                prepareForOverwrite(target)
+            }
+            if (tmp.renameTo(target)) {
+                return
+            }
+            streamCopy(tmp, target)
+        } finally {
+            if (tmp.exists()) {
+                tmp.delete()
+            }
+        }
+    }
+
+    /** Запасной cp в том же shell-процессе — ближе к поведению ZArchiver. */
+    private fun copyViaExec(source: File, target: File) {
+        target.parentFile?.let { ensureDirectory(it) }
+        if (target.exists()) {
+            prepareForOverwrite(target)
+        }
+        val commands = listOf(
+            arrayOf("toybox", "cp", "-f", source.absolutePath, target.absolutePath),
+            arrayOf("cp", "-f", source.absolutePath, target.absolutePath),
+        )
+        var lastError: Exception? = null
+        for (cmd in commands) {
+            try {
+                val proc = Runtime.getRuntime().exec(cmd)
+                val code = proc.waitFor()
+                if (code == 0 && target.exists() && target.length() == source.length()) {
+                    return
+                }
+                lastError = IllegalStateException("exit=$code for ${cmd.joinToString(" ")}")
+            } catch (e: Exception) {
+                lastError = e
+            }
+        }
+        throw lastError ?: IllegalStateException("exec cp failed")
     }
 
     private fun writeViaStream(file: File, data: ByteArray, append: Boolean) {
@@ -90,7 +238,6 @@ class FileTransferUserService : IFileTransferService.Stub {
             if (tmp.renameTo(file)) {
                 return
             }
-            // renameTo может вернуть false на FUSE/exFAT — копируем вручную.
             FileInputStream(tmp).use { input ->
                 FileOutputStream(file, false).use { output ->
                     input.copyTo(output)

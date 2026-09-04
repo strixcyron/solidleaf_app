@@ -4,7 +4,7 @@ import '../services/cover_accent_loader.dart';
 
 /// Пресеты оформления лаунчера. Выбираются в настройках.
 enum AppThemePreset {
-  dynamicCover('Из обложки', 'Цвета берутся из обложки игры'),
+  dynamicCover('Из баннера', 'Цвета подстраиваются под обложку в баннере'),
   amoled('AMOLED', 'Чистый чёрный — экономит батарею на OLED'),
   neon('Неон', 'Тёмная тема с яркими акцентами'),
   sepia('Сепия', 'Тёплая «бумажная» светлая тема'),
@@ -56,6 +56,8 @@ class AppTheme {
   static ThemeData light({
     AppThemePreset preset = AppThemePreset.dynamicCover,
     Color? coverAccent,
+    Color? coverSecondary,
+    Color? coverMuted,
     Color? customAccent,
     ColorScheme? dynamicScheme,
   }) =>
@@ -63,6 +65,8 @@ class AppTheme {
         preset: preset,
         isDark: false,
         coverAccent: coverAccent,
+        coverSecondary: coverSecondary,
+        coverMuted: coverMuted,
         customAccent: customAccent,
         dynamicScheme: dynamicScheme,
       );
@@ -71,6 +75,8 @@ class AppTheme {
   static ThemeData dark({
     AppThemePreset preset = AppThemePreset.dynamicCover,
     Color? coverAccent,
+    Color? coverSecondary,
+    Color? coverMuted,
     Color? customAccent,
     ColorScheme? dynamicScheme,
   }) =>
@@ -78,17 +84,36 @@ class AppTheme {
         preset: preset,
         isDark: true,
         coverAccent: coverAccent,
+        coverSecondary: coverSecondary,
+        coverMuted: coverMuted,
         customAccent: customAccent,
         dynamicScheme: dynamicScheme,
       );
 
   /// Акцентный цвет пресета для превью в настройках.
-  static Color previewAccent(AppThemePreset preset, {bool isDark = true}) =>
-      _paletteFor(preset, isDark).primary;
+  static Color previewAccent(
+    AppThemePreset preset, {
+    bool isDark = true,
+    Color? coverAccent,
+  }) {
+    if (preset == AppThemePreset.dynamicCover && coverAccent != null) {
+      return normalizeCoverAccent(coverAccent, isDark: isDark);
+    }
+    return _paletteFor(preset, isDark).primary;
+  }
 
   /// Фон пресета для превью в настройках.
-  static Color previewBackground(AppThemePreset preset, {bool isDark = true}) =>
-      _paletteFor(preset, isDark).scaffold;
+  static Color previewBackground(
+    AppThemePreset preset, {
+    bool isDark = true,
+    Color? coverMuted,
+    Color? coverAccent,
+  }) {
+    final p = _paletteFor(preset, isDark);
+    if (preset != AppThemePreset.dynamicCover) return p.scaffold;
+    final tint = coverMuted ?? coverAccent;
+    return blendAccent(p.scaffold, tint, isDark ? 0.22 : 0.14);
+  }
 
   /// Реальная яркость, которую даст пресет (для выбора themeMode в main).
   static Brightness effectiveBrightness(AppThemePreset preset, bool isDark) {
@@ -102,11 +127,16 @@ class AppTheme {
     required AppThemePreset preset,
     required bool isDark,
     Color? coverAccent,
+    Color? coverSecondary,
+    Color? coverMuted,
     Color? customAccent,
     ColorScheme? dynamicScheme,
   }) {
-    // Material You (адаптивные цвета) — только если нет пользовательского акцента.
-    if (customAccent == null && dynamicScheme != null) {
+    // Material You — только если не выбран пресет «Из баннера»
+    // (баннер важнее системных обоев) и нет своего акцента.
+    if (customAccent == null &&
+        dynamicScheme != null &&
+        preset != AppThemePreset.dynamicCover) {
       return _fromScheme(dynamicScheme);
     }
 
@@ -118,25 +148,48 @@ class AppTheme {
     if (customAccent != null) {
       primary = customAccent;
       secondary = customAccent;
+    } else if (usesCover && coverAccent != null) {
+      primary = normalizeCoverAccent(coverAccent, isDark: isDark);
+      secondary = normalizeCoverAccent(
+        coverSecondary ?? coverAccent,
+        isDark: isDark,
+      );
     } else {
-      primary = usesCover ? blendAccent(p.primary, coverAccent, 0.14) : p.primary;
-      secondary =
-          usesCover ? blendAccent(p.secondary, coverAccent, 0.10) : p.secondary;
+      primary = p.primary;
+      secondary = p.secondary;
     }
+
+    final scaffold = usesCover
+        ? blendAccent(
+            p.scaffold,
+            coverMuted ?? coverAccent,
+            isDark ? 0.20 : 0.12,
+          )
+        : p.scaffold;
+    final card = usesCover
+        ? blendAccent(
+            p.card,
+            coverMuted ?? coverAccent,
+            isDark ? 0.16 : 0.10,
+          )
+        : p.card;
+    final divider = usesCover
+        ? blendAccent(p.divider, coverAccent, isDark ? 0.18 : 0.12)
+        : p.divider;
 
     final scheme = ColorScheme.fromSeed(
       seedColor: primary,
       primary: primary,
       secondary: secondary,
-      surface: p.card,
+      surface: card,
       brightness: p.brightness,
     );
 
     return _assemble(
       brightness: p.brightness,
-      scaffold: p.scaffold,
-      card: p.card,
-      divider: p.divider,
+      scaffold: scaffold,
+      card: card,
+      divider: divider,
       scheme: scheme,
       textPrimary: p.textPrimary,
       textSecondary: p.textSecondary,

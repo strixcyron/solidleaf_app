@@ -14,6 +14,13 @@ interface IFileTransferService {
     boolean exists(String path) = 6;
     boolean isDirectory(String path) = 7;
 
+    // Локальное копирование внутри shell-процесса (как ZArchiver / MT Manager).
+    // Без гонки больших ByteArray через Binder — критично для HyperOS.
+    boolean copyFile(String src, String dst) = 8;
+
+    // Список относительных путей файлов под rootDir (через '\n'), для бэкапа.
+    String listRelativeFiles(String rootDir) = 9;
+
     // Fixed transaction code required by Shizuku so unbindUserService(..., remove=true)
     // can reliably invoke cleanup even if the interface's method order changes.
     void destroy() = 16777114;

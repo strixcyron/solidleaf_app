@@ -43,11 +43,11 @@ class MainActivity : FlutterActivity() {
     private val userServiceArgs: Shizuku.UserServiceArgs by lazy {
         // tag стабилен после ProGuard; version бампим при смене логики FS-сервиса.
         Shizuku.UserServiceArgs(ComponentName(packageName, FileTransferUserService::class.java.name))
-            .daemon(false)
+            .daemon(true)
             .processNameSuffix("filesvc")
             .tag("solidleaf_filesvc")
             .debuggable(false)
-            .version(2)
+            .version(5)
     }
 
     private val binderDeadListener = Shizuku.OnBinderDeadListener {
@@ -251,6 +251,25 @@ class MainActivity : FlutterActivity() {
                     val path = call.arguments as? String ?: ""
                     try {
                         result.success(requireFileService().isDirectory(path))
+                    } catch (e: Exception) {
+                        result.error("FS_ERROR", e.message, null)
+                    }
+                }
+                "fsCopyFile" -> {
+                    // Локальное копирование в shell-процессе (без Binder-чанков).
+                    val args = call.arguments as? Map<*, *>
+                    val src = args?.get("src") as? String ?: ""
+                    val dst = args?.get("dst") as? String ?: ""
+                    try {
+                        result.success(requireFileService().copyFile(src, dst))
+                    } catch (e: Exception) {
+                        result.error("FS_ERROR", e.message, null)
+                    }
+                }
+                "fsListRelativeFiles" -> {
+                    val path = call.arguments as? String ?: ""
+                    try {
+                        result.success(requireFileService().listRelativeFiles(path))
                     } catch (e: Exception) {
                         result.error("FS_ERROR", e.message, null)
                     }

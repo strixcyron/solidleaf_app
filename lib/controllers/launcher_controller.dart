@@ -12,6 +12,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_constants.dart';
 import '../config/github_config.dart';
+import '../data/animated_covers.dart';
+import '../data/static_covers.dart';
 import '../services/cover_accent_loader.dart';
 import '../services/game_path_finder.dart';
 import '../services/notification_service.dart';
@@ -120,6 +122,9 @@ class LauncherController extends ChangeNotifier {
   String statusText = 'Готово';
   List<String> logs = [];
   Color? coverAccent;
+  Color? coverSecondary;
+  Color? coverMuted;
+  int _coverAccentLoadGen = 0;
 
   Map<String, dynamic>? _cachedRelease;
   DateTime? _cachedReleaseAt;
@@ -498,9 +503,56 @@ class LauncherController extends ChangeNotifier {
     } else {
       hasArtUpdate = false;
     }
-    coverAccent = await CoverAccentLoader.load();
+    await refreshCoverAccent();
     notifyListeners();
     _startBackgroundUpdatePolling();
+  }
+
+  /// Источник картинки баннера для палитры темы.
+  ({String? assetPath, String? filePath, List<String> fallbacks})
+      resolveBannerAccentSource() {
+    if (animatedCoverEnabled) {
+      final cover = animatedCovers[
+          animatedCoverIndex.clamp(0, animatedCovers.length - 1)];
+      return (
+        assetPath: cover.webp,
+        filePath: null,
+        fallbacks: [cover.gif, 'assets/images/cover.jpg'],
+      );
+    }
+    final custom = customCoverPath;
+    if (custom != null && custom.isNotEmpty) {
+      return (
+        assetPath: null,
+        filePath: custom,
+        fallbacks: const ['assets/images/cover.jpg'],
+      );
+    }
+    final static = staticCovers[
+        staticCoverIndex.clamp(0, staticCovers.length - 1)];
+    return (
+      assetPath: static.asset.isNotEmpty
+          ? static.asset
+          : 'assets/images/cover.jpg',
+      filePath: null,
+      fallbacks: const ['assets/images/cover.jpg'],
+    );
+  }
+
+  /// Пересчитать акценты темы по текущему баннеру.
+  Future<void> refreshCoverAccent() async {
+    final gen = ++_coverAccentLoadGen;
+    final source = resolveBannerAccentSource();
+    final palette = await CoverAccentLoader.load(
+      assetPath: source.assetPath,
+      filePath: source.filePath,
+      assetFallbacks: source.fallbacks,
+    );
+    if (gen != _coverAccentLoadGen) return;
+    coverAccent = palette.primary;
+    coverSecondary = palette.secondary;
+    coverMuted = palette.muted;
+    notifyListeners();
   }
 
   Timer? _updatePollTimer;
@@ -612,6 +664,7 @@ class LauncherController extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('animated_cover', value);
     notifyListeners();
+    unawaited(refreshCoverAccent());
   }
 
   /// Выбрать вариант анимированной обложки (0..6).
@@ -620,6 +673,7 @@ class LauncherController extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('animated_cover_index', animatedCoverIndex);
     notifyListeners();
+    unawaited(refreshCoverAccent());
   }
 
   Future<void> setStaticCoverIndex(int index) async {
@@ -629,6 +683,7 @@ class LauncherController extends ChangeNotifier {
     await prefs.setInt('static_cover_index', staticCoverIndex);
     await prefs.remove('custom_cover_path');
     notifyListeners();
+    unawaited(refreshCoverAccent());
   }
 
   Future<void> setCustomCoverPath(String? path) async {
@@ -640,6 +695,7 @@ class LauncherController extends ChangeNotifier {
       await prefs.setString('custom_cover_path', path);
     }
     notifyListeners();
+    unawaited(refreshCoverAccent());
   }
 
   Future<void> setLaunchPostAction(LaunchPostAction action) async {
@@ -683,6 +739,9 @@ class LauncherController extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('theme_preset', preset.name);
     notifyListeners();
+    if (preset == AppThemePreset.dynamicCover) {
+      unawaited(refreshCoverAccent());
+    }
   }
 
   static const _gameDataFolderHint = 'reverse1999_Data';
@@ -775,14 +834,33 @@ class LauncherController extends ChangeNotifier {
           .toSet();
 
   String _backupFolderName() {
-    return path.join(installPath, 'backup_solidleaf');
+    return path.join(_normalizedInstallPath(), 'backup_solidleaf');
+  }
+
+  /// Нормализация пути Android/data: без пробелов в сегментах, единый '/'.
+  String _normalizedInstallPath() {
+    var p = installPath.replaceAll('\\', '/').trim();
+    // Частый артефакт: "Android/data/ com.package"
+    p = p.replaceAll(RegExp(r'Android/data/\s+'), 'Android/data/');
+    p = p.replaceAll(RegExp(r'/+'), '/');
+    if (p.isNotEmpty && !p.endsWith('/')) {
+      // path.join сам разберётся; хвостовой / оставляем для корня data
+    }
+    return p;
   }
 
   String _joinPath(String base, String relative) {
-    return path.join(base, relative);
+    return path.join(base.replaceAll('\\', '/').trim(), relative.trim());
   }
 
-  static const int _fsChunkSize = 512 * 1024;
+  static const int _fsChunkSize = 256 * 1024;
+
+  /// Публичный staging на /sdcard — shell читает его как ZArchiver (в отличие от
+  /// Android/data нашего приложения, который HyperOS часто закрывает).
+  static const String _publicShellStagingRoot =
+      '/storage/emulated/0/SolidLeaf_staging';
+
+  String? _activeShellStagingDir;
 
   Future<void> _ensureFileService({int attempts = 4}) async {
     const methodChannel = MethodChannel(shizukuChannel);
@@ -836,7 +914,10 @@ class LauncherController extends ChangeNotifier {
   }
 
   /// Проверка реальной записи в Android/data до копирования архива.
-  Future<void> _probeAndroidWriteAccess(String targetRoot) async {
+  Future<void> _probeAndroidWriteAccess(
+    String targetRoot, {
+    bool throwOnFail = true,
+  }) async {
     const methodChannel = MethodChannel(shizukuChannel);
     try {
       final raw = await methodChannel.invokeMethod<dynamic>(
@@ -851,6 +932,7 @@ class LauncherController extends ChangeNotifier {
       final err = raw is Map ? raw['error'] : null;
       throw Exception('probe failed stage=$stage error=$err');
     } on PlatformException catch (e) {
+      if (!throwOnFail) rethrow;
       throw PatchInstallException(
         'Shizuku подключён, но запись в папку игры запрещена оболочкой:\n'
         '${e.message ?? e.code}\n'
@@ -859,6 +941,7 @@ class LauncherController extends ChangeNotifier {
         'батареи, закройте игру и повторите.',
       );
     } catch (e) {
+      if (!throwOnFail) rethrow;
       throw PatchInstallException(
         'Не удалось проверить запись в данные игры через Shizuku.\n'
         'Путь: $targetRoot\n'
@@ -901,8 +984,9 @@ class LauncherController extends ChangeNotifier {
         return;
       }
       final resolved = GamePathFinder.androidDataPathFor(pkg);
-      if (resolved != installPath) {
-        installPath = resolved;
+      final cleaned = resolved.replaceAll(RegExp(r'Android/data/\s+'), 'Android/data/');
+      if (cleaned != installPath) {
+        installPath = cleaned;
         _refreshInstallPathState();
         addLog('Путь Android/data игры: $installPath (пакет $pkg)');
         notifyListeners();
@@ -910,6 +994,32 @@ class LauncherController extends ChangeNotifier {
     } catch (e) {
       addLog('resolveGamePackage: $e — оставляем $installPath');
     }
+  }
+
+  /// Подбирает рабочий корень Android/data (алиасы /sdcard и т.п.).
+  Future<String> _pickWritableAndroidDataRoot(String preferredRoot) async {
+    final pkgMatch = RegExp(
+      r'Android/data/([^/]+)',
+      caseSensitive: false,
+    ).firstMatch(preferredRoot.replaceAll('\\', '/'));
+    final pkg = pkgMatch?.group(1) ?? 'com.bluepoch.m.en.reverse1999';
+    final candidates = <String>{
+      preferredRoot.endsWith('/') ? preferredRoot : '$preferredRoot/',
+      ...GamePathFinder.androidDataPathCandidates(pkg),
+    }.toList();
+
+    for (final candidate in candidates) {
+      try {
+        final mk = await _fsMkdirs(candidate);
+        if (!mk && !await _fsExists(candidate)) continue;
+        await _probeAndroidWriteAccess(candidate, throwOnFail: false);
+        addLog('Рабочий корень Android/data: $candidate');
+        return candidate;
+      } catch (e) {
+        addLog('Корень недоступен для записи: $candidate ($e)');
+      }
+    }
+    return preferredRoot.endsWith('/') ? preferredRoot : '$preferredRoot/';
   }
 
   Future<bool> _fsMkdirs(String targetPath) async {
@@ -995,12 +1105,66 @@ class LauncherController extends ChangeNotifier {
     }
   }
 
+  /// Список относительных путей файлов под каталогом (через Shizuku).
+  Future<List<String>> _fsListRelativeFiles(String rootDir) async {
+    const methodChannel = MethodChannel(shizukuChannel);
+    try {
+      final raw = await methodChannel.invokeMethod<String>(
+        'fsListRelativeFiles',
+        rootDir,
+      );
+      if (raw == null || raw.trim().isEmpty) return const [];
+      return raw
+          .split('\n')
+          .map((e) => e.trim().replaceAll('\\', '/'))
+          .where((e) => e.isNotEmpty)
+          .toList();
+    } on PlatformException catch (e) {
+      throw Exception('listFiles: ${e.message ?? e.code} ($rootDir)');
+    }
+  }
+
+  /// Копирование внутри shell-процесса (как ZArchiver) — без Binder-чанков.
+  Future<void> _fsCopyFileNative(String src, String dst) async {
+    const methodChannel = MethodChannel(shizukuChannel);
+    try {
+      final ok = await methodChannel.invokeMethod<bool>('fsCopyFile', {
+            'src': src,
+            'dst': dst,
+          }) ??
+          false;
+      if (!ok) {
+        throw Exception('copyFile вернул false');
+      }
+    } on PlatformException catch (e) {
+      throw Exception('copyFile: ${e.message ?? e.code} ($src -> $dst)');
+    }
+  }
+
+  /// Путь доступен shell для чтения (staging / Android/data / sdcard).
+  bool _isShellReadablePath(String p) {
+    final n = p.replaceAll('\\', '/').toLowerCase();
+    return n.startsWith('/storage/') ||
+        n.startsWith('/sdcard/') ||
+        n.startsWith('/mnt/');
+  }
+
   Future<void> _fsCopyFile(String src, String dst) async {
     await _fsMkdirs(path.dirname(dst));
-    // Перед перезаписью бэкапа убираем старый файл (OEM truncate).
     if (await _fsExists(dst)) {
       await _fsDeleteRecursive(dst);
     }
+
+    // Предпочтительно локальное copyFile в UserService (HyperOS / ZArchiver-style).
+    if (_isShellReadablePath(src)) {
+      try {
+        await _fsCopyFileNative(src, dst);
+        return;
+      } catch (e) {
+        addLog('copyFile native не удался, fallback chunks: $e');
+      }
+    }
+
     final size = await _fsFileSize(src);
     if (size < 0) {
       throw Exception('Источник не найден или недоступен: $src');
@@ -1057,13 +1221,64 @@ class LauncherController extends ChangeNotifier {
 
   Future<void> _fsWriteLocalFileOnce(File localFile, String dstPath) async {
     await _fsMkdirs(path.dirname(dstPath));
-    // Удаляем целевой файл до записи — обход O_TRUNC на HyperOS/Honor.
     if (await _fsExists(dstPath)) {
       final deleted = await _fsDeleteRecursive(dstPath);
       if (!deleted && await _fsExists(dstPath)) {
         addLog('Предупреждение: не удалось удалить перед записью: $dstPath');
       }
     }
+
+    // 1) Быстрый путь (большинство устройств): прямой copyFile, если shell
+    //    читает источник (shared storage).
+    if (_isShellReadablePath(localFile.path)) {
+      try {
+        await _fsCopyFileNative(localFile.path, dstPath);
+        return;
+      } catch (e) {
+        addLog(
+          'Прямой copyFile для ${path.basename(dstPath)} не удался '
+          '(часто HyperOS не читает Android/data лаунчера): $e',
+        );
+      }
+    }
+
+    // 2) HyperOS/ZArchiver-путь: сначала на /sdcard, потом copyFile в игру.
+    final staged = await _stageLocalFileOnPublicSdcard(localFile);
+    if (staged != null) {
+      try {
+        await _fsCopyFileNative(staged, dstPath);
+        return;
+      } catch (e) {
+        addLog(
+          'copyFile со staging ${path.basename(dstPath)} не удался: $e',
+        );
+      }
+    }
+
+    // 3) Запасной путь: чанки напрямую в целевой файл.
+    await _writeLocalFileViaChunks(localFile, dstPath);
+  }
+
+  /// Кладёт файл в /sdcard/SolidLeaf_staging через shell writeChunk.
+  Future<String?> _stageLocalFileOnPublicSdcard(File localFile) async {
+    try {
+      final dir = _activeShellStagingDir ??
+          '$_publicShellStagingRoot/job_${DateTime.now().millisecondsSinceEpoch}';
+      _activeShellStagingDir = dir;
+      await _fsMkdirs(dir);
+      final stagingPath = path.join(
+        dir,
+        '${DateTime.now().microsecondsSinceEpoch}_${path.basename(localFile.path)}',
+      );
+      await _writeLocalFileViaChunks(localFile, stagingPath);
+      return stagingPath;
+    } catch (e) {
+      addLog('Публичный staging на /sdcard недоступен: $e');
+      return null;
+    }
+  }
+
+  Future<void> _writeLocalFileViaChunks(File localFile, String dstPath) async {
     final data = await localFile.readAsBytes();
     if (data.isEmpty) {
       final ok = await _fsWriteChunk(dstPath, Uint8List(0), false);
@@ -1083,6 +1298,18 @@ class LauncherController extends ChangeNotifier {
       }
       first = false;
       offset = end;
+    }
+  }
+
+  Future<void> _cleanupPublicShellStaging() async {
+    final dir = _activeShellStagingDir;
+    _activeShellStagingDir = null;
+    if (dir == null || dir.isEmpty) return;
+    try {
+      await _fsDeleteRecursive(dir);
+      addLog('Публичный staging удалён: $dir');
+    } catch (e) {
+      addLog('Не удалось удалить staging $dir: $e');
     }
   }
 
@@ -1292,27 +1519,40 @@ class LauncherController extends ChangeNotifier {
     try {
       if (Platform.isAndroid) {
         if (!isShizukuActive) {
+          await checkShizukuStatus();
+        }
+        if (!isShizukuActive) {
           addLog('Shizuku не активен — восстановление на Android невозможно');
-          throw Exception('Shizuku required for Android restore');
+          throw Exception(
+            'Нужен Shizuku: откройте приложение, нажмите Start и разрешите SolidLeaf.',
+          );
         }
         await _ensureFileService();
+        // Подтянуть актуальный пакет/путь перед работой с Android/data.
+        await _resolveAndroidGameInstallPath();
       }
 
       List<String> toRestore = [];
-      final backupDir = Directory(backupDirPath);
 
       if (lastBackupFiles.isNotEmpty &&
           (kind == 'all' || lastBackupKind == kind)) {
         toRestore = List.from(lastBackupFiles);
       } else if (kind == 'art') {
-        if (await backupDir.exists()) {
-          toRestore = backupDir
-              .listSync(recursive: true)
-              .whereType<File>()
-              .map((f) => path.relative(f.path, from: backupDirPath))
-              .toList();
+        // Android/data недоступен обычному File API — только через Shizuku.
+        if (Platform.isAndroid) {
+          final exists = await _fsExists(backupDirPath);
+          if (exists) {
+            toRestore = await _fsListRelativeFiles(backupDirPath);
+          }
         } else {
-          toRestore = [];
+          final backupDir = Directory(backupDirPath);
+          if (await backupDir.exists()) {
+            toRestore = backupDir
+                .listSync(recursive: true)
+                .whereType<File>()
+                .map((f) => path.relative(f.path, from: backupDirPath))
+                .toList();
+          }
         }
       } else {
         toRestore = Platform.isWindows
@@ -1322,12 +1562,20 @@ class LauncherController extends ChangeNotifier {
 
       if (toRestore.isEmpty) {
         addLog('В бэкапе не найдены файлы для восстановления (kind=$kind).');
-        throw Exception('No backup files found for restore');
+        throw Exception(
+          kind == 'art'
+              ? 'Нет резервной копии графики. Удалить текстуры можно только '
+                  'если они ставились этим лаунчером (есть backup_solidleaf).'
+              : 'Нет файлов бэкапа для восстановления.',
+        );
       }
 
+      final installRoot = _normalizedInstallPath();
+      final backupRoot = path.join(installRoot, 'backup_solidleaf');
+
       for (final rel in toRestore) {
-        final src = _joinPath(backupDirPath, rel);
-        final dst = _joinPath(installPath, rel);
+        final src = _joinPath(backupRoot, rel);
+        final dst = _joinPath(installRoot, rel);
 
         if (Platform.isWindows) {
           final srcFile = File(src);
@@ -1351,9 +1599,9 @@ class LauncherController extends ChangeNotifier {
 
       if (Platform.isAndroid) {
         try {
-          final exists = await _fsExists(backupDirPath);
+          final exists = await _fsExists(backupRoot);
           if (exists) {
-            final ok = await _fsDeleteRecursive(backupDirPath);
+            final ok = await _fsDeleteRecursive(backupRoot);
             if (ok) {
               addLog('Папка бэкапа удалена (Shizuku)');
             } else {
@@ -1366,7 +1614,7 @@ class LauncherController extends ChangeNotifier {
           );
         }
       } else {
-        final backupDirLocal = Directory(backupDirPath);
+        final backupDirLocal = Directory(backupRoot);
         if (await backupDirLocal.exists()) {
           await backupDirLocal.delete(recursive: true);
           addLog('Папка бэкапа удалена');
@@ -1394,6 +1642,8 @@ class LauncherController extends ChangeNotifier {
         statusText = 'Русификатор удалён полностью. Состояние: Не установлено.';
       }
 
+      lastBackupFiles = [];
+      lastBackupKind = null;
       addLog('Восстановление завершено. Версии сброшены.');
       notifyListeners();
     } catch (e) {
@@ -2344,10 +2594,15 @@ class LauncherController extends ChangeNotifier {
       await _resolveAndroidGameInstallPath();
       await _ensureFileService();
 
-      final tempRoot = await getTemporaryDirectory();
+      // Распаковка во временную папку приложения; в игру файлы уйдут через
+      // shell: прямой copyFile → /sdcard staging → чанки.
+      final stagingRoot =
+          await getExternalStorageDirectory() ?? await getTemporaryDirectory();
+      addLog('Временная распаковка архива: ${stagingRoot.path}');
+
       final workDir = Directory(
         path.join(
-          tempRoot.path,
+          stagingRoot.path,
           'SolidLeaf_Temp',
           'install_${archiveKind}_${DateTime.now().millisecondsSinceEpoch}',
         ),
@@ -2375,9 +2630,17 @@ class LauncherController extends ChangeNotifier {
           }
         }
 
-        final normTarget = path.normalize(installPath.isNotEmpty ? installPath : targetDir);
+        final preferredRoot =
+            path.normalize(installPath.isNotEmpty ? installPath : targetDir);
+        final dataRoot = await _pickWritableAndroidDataRoot(preferredRoot);
+        if (dataRoot != installPath) {
+          installPath = dataRoot;
+          _refreshInstallPathState();
+          notifyListeners();
+        }
+
         String sourceDir = workDir.path;
-        String finalTarget = normTarget;
+        String finalTarget = dataRoot;
 
         Directory? luabytesDir;
         try {
@@ -2393,7 +2656,7 @@ class LauncherController extends ChangeNotifier {
 
         if (luabytesDir != null) {
           sourceDir = path.normalize(luabytesDir.parent.path);
-          finalTarget = path.join(normTarget, 'files', 'ResLib', 'Android');
+          finalTarget = path.join(dataRoot, 'files', 'ResLib', 'Android');
         }
 
         sourceDir = path.normalize(sourceDir);
@@ -2417,14 +2680,28 @@ class LauncherController extends ChangeNotifier {
           );
         }
 
-        // До бэкапа/копирования — убеждаемся, что оболочка реально пускает запись.
-        await _probeAndroidWriteAccess(finalTarget);
+        // Мягкая проверка: на части HyperOS probe ложно падает, а copy работает.
+        try {
+          await _probeAndroidWriteAccess(finalTarget);
+        } catch (e) {
+          addLog(
+            'Предупреждение probe записи ($e) — продолжаем установку '
+            '(режим /sdcard staging → copyFile).',
+          );
+        }
 
         await _backupOnlyOverwrittenFiles(
           sourceDir,
           finalTarget,
           allFiles,
           kind: archiveKind,
+        );
+
+        _activeShellStagingDir =
+            '$_publicShellStagingRoot/install_${archiveKind}_${DateTime.now().millisecondsSinceEpoch}';
+        addLog(
+          'Копирование ${allFiles.length} файлов: '
+          'staging /sdcard → Android/data (как ZArchiver)...',
         );
 
         int copied = 0;
@@ -2465,6 +2742,7 @@ class LauncherController extends ChangeNotifier {
         addLog('Ошибка распаковки/копирования архива: ${e.toString()}');
         rethrow;
       } finally {
+        await _cleanupPublicShellStaging();
         try {
           if (await workDir.exists()) {
             await workDir.delete(recursive: true);

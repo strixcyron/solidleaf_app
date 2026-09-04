@@ -68,12 +68,15 @@ Future<void> confirmAndRemoveComponent(
     );
   } catch (e) {
     if (!context.mounted) return;
+    final raw = e.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
+    final message = raw.contains('Permission denied') ||
+            raw.contains('PathAccess') ||
+            raw.contains('Shizuku')
+        ? 'Не удалось удалить. Нужен активный Shizuku с доступом к '
+            'Android/data (Stop→Start, разрешите SolidLeaf).'
+        : 'Не удалось удалить: $raw';
     messenger?.showSnackBar(
-      SnackBar(
-        content: Text(
-          'Не удалось удалить: ${e.toString().replaceFirst(RegExp(r'^Exception:\s*'), '')}',
-        ),
-      ),
+      SnackBar(content: Text(message)),
     );
   }
 }

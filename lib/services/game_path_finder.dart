@@ -23,6 +23,21 @@ class GamePathFinder {
   static String androidDataPathFor(String packageName) =>
       '/storage/emulated/0/Android/data/$packageName/';
 
+  /// Альтернативные пути к Android/data (HyperOS / разные FUSE-алиасы).
+  static List<String> androidDataPathCandidates(String packageName) {
+    final pkg = packageName.trim();
+    if (pkg.isEmpty) {
+      return const [
+        '/storage/emulated/0/Android/data/com.bluepoch.m.en.reverse1999/',
+        '/sdcard/Android/data/com.bluepoch.m.en.reverse1999/',
+      ];
+    }
+    return [
+      '/storage/emulated/0/Android/data/$pkg/',
+      '/sdcard/Android/data/$pkg/',
+      '/storage/self/primary/Android/data/$pkg/',
+    ];
+  }
   /// Папка данных Unity — обязательный признак корня установки на Windows.
   static const dataFolderName = 'reverse1999_Data';
 

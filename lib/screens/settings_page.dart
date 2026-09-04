@@ -55,7 +55,7 @@ class SettingsPage extends StatelessWidget {
                     secondary: const Icon(Icons.dark_mode_rounded),
                     title: const Text('Тёмная тема'),
                     subtitle: const Text(
-                      'Для тем «Из обложки» и адаптивных цветов',
+                      'Для тем «Из баннера» и адаптивных цветов',
                     ),
                     value: controller.isDarkMode,
                     onChanged: (_) => controller.toggleTheme(),
@@ -67,7 +67,8 @@ class SettingsPage extends StatelessWidget {
                       secondary: const Icon(Icons.palette_outlined),
                       title: const Text('Адаптивные цвета системы'),
                       subtitle: const Text(
-                        'Material You — цвета из обоев (Android 12+)',
+                        'Material You из обоев Android. '
+                        'Пресет «Из баннера» всегда берёт цвета с обложки лаунчера.',
                       ),
                       value: controller.dynamicColorEnabled,
                       onChanged: controller.setDynamicColor,
@@ -291,6 +292,9 @@ class _ThemePresetGrid extends StatelessWidget {
           _PresetTile(
             preset: preset,
             selected: controller.themePreset == preset,
+            coverAccent: controller.coverAccent,
+            coverMuted: controller.coverMuted,
+            isDark: controller.isDarkMode,
             onTap: () => controller.setThemePreset(preset),
           ),
       ],
@@ -303,16 +307,31 @@ class _PresetTile extends StatelessWidget {
     required this.preset,
     required this.selected,
     required this.onTap,
+    this.coverAccent,
+    this.coverMuted,
+    this.isDark = true,
   });
 
   final AppThemePreset preset;
   final bool selected;
   final VoidCallback onTap;
+  final Color? coverAccent;
+  final Color? coverMuted;
+  final bool isDark;
 
   @override
   Widget build(BuildContext context) {
-    final accent = AppTheme.previewAccent(preset);
-    final bg = AppTheme.previewBackground(preset);
+    final accent = AppTheme.previewAccent(
+      preset,
+      isDark: isDark,
+      coverAccent: coverAccent,
+    );
+    final bg = AppTheme.previewBackground(
+      preset,
+      isDark: isDark,
+      coverAccent: coverAccent,
+      coverMuted: coverMuted,
+    );
     final textPrimary = Theme.of(context).textTheme.bodyMedium?.color;
 
     return SizedBox(
