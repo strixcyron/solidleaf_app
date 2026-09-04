@@ -7,6 +7,8 @@ import 'package:window_manager/window_manager.dart';
 
 import 'controllers/launcher_controller.dart';
 import 'screens/login_screen.dart';
+import 'services/notification_service.dart';
+import 'services/tray_service.dart';
 import 'theme/app_theme.dart';
 import 'utils/single_instance.dart';
 
@@ -18,6 +20,8 @@ Future<void> main() async {
   if (!isFirst) {
     exit(0);
   }
+
+  await NotificationService.instance.init();
 
   if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
     await windowManager.ensureInitialized();
@@ -40,6 +44,9 @@ Future<void> main() async {
       await _ensureSaneWindowGeometry(minSize: minSize, defaultSize: defaultSize);
       await windowManager.show();
       await windowManager.focus();
+      if (Platform.isWindows) {
+        await TrayService.instance.init();
+      }
     });
   }
 

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../controllers/launcher_controller.dart';
 import '../data/launcher_changelog.dart';
 
 /// Компактный бейдж версии лаунчера («alpha v0.2»). По клику открывает диалог
@@ -57,10 +59,16 @@ Future<void> showLauncherChangelogDialog(BuildContext context) {
   final textPrimary = Theme.of(context).textTheme.bodyMedium?.color;
   final textSecondary = Theme.of(context).textTheme.bodySmall?.color;
   final accent = Theme.of(context).colorScheme.primary;
+  final animate =
+      Provider.of<LauncherController>(context, listen: false).animationsEnabled;
 
-  return showDialog<void>(
+  return showGeneralDialog<void>(
     context: context,
-    builder: (ctx) {
+    barrierDismissible: true,
+    barrierLabel: 'Dismiss',
+    barrierColor: Colors.black.withValues(alpha: 0.5),
+    transitionDuration: Duration(milliseconds: animate ? 280 : 0),
+    pageBuilder: (ctx, animation, secondaryAnimation) {
       return AlertDialog(
         backgroundColor: Theme.of(ctx).cardColor,
         shape: RoundedRectangleBorder(
@@ -168,6 +176,21 @@ Future<void> showLauncherChangelogDialog(BuildContext context) {
             child: const Text('Закрыть'),
           ),
         ],
+      );
+    },
+    transitionBuilder: (ctx, animation, secondaryAnimation, child) {
+      if (!animate) return child;
+      final curved = CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeOutCubic,
+        reverseCurve: Curves.easeInCubic,
+      );
+      return FadeTransition(
+        opacity: curved,
+        child: ScaleTransition(
+          scale: Tween<double>(begin: 0.94, end: 1).animate(curved),
+          child: child,
+        ),
       );
     },
   );

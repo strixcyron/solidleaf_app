@@ -1,8 +1,10 @@
 // ignore_for_file: use_build_context_synchronously
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
@@ -10,7 +12,10 @@ import 'package:window_manager/window_manager.dart';
 import '../config/app_constants.dart';
 import '../controllers/launcher_controller.dart';
 import '../data/animated_covers.dart';
+import '../data/static_covers.dart';
+import '../services/tray_service.dart';
 import '../telegram_auth_service.dart';
+import '../utils/app_dialogs.dart';
 import '../utils/install_errors.dart';
 import '../widgets/animated_cover_view.dart';
 import '../widgets/effects/animated_status_badge.dart';
@@ -63,6 +68,9 @@ class _MainScreenState extends State<MainScreen>
   bool _ctaHighlight = false;
   bool _welcomeHandled = false;
   LauncherController? _controller;
+  /// Обратный отсчёт до закрытия после запуска игры (null = нет).
+  int? _launchCloseCountdown;
+  Timer? _launchCloseTimer;
 
   @override
   void initState() {
@@ -109,6 +117,7 @@ class _MainScreenState extends State<MainScreen>
 
   @override
   void dispose() {
+    _launchCloseTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
       windowManager.removeListener(this);
@@ -709,6 +718,8 @@ class _MainScreenState extends State<MainScreen>
 
   /// Запуск игры; если нет текстур у Premium — предложить доустановить.
   Future<void> _handleLaunchGame(LauncherController controller) async {
+    if (_launchCloseCountdown != null) return;
+
     final offerTextures = controller.isPremium &&
         controller.isTextInstalled &&
         !controller.isTexturesInstalled;
@@ -754,6 +765,8 @@ class _MainScreenState extends State<MainScreen>
 
     try {
       await controller.launchGame();
+      if (!mounted) return;
+      await _applyLaunchPostAction(controller);
     } catch (e) {
       if (!mounted) return;
       final messenger = ScaffoldMessenger.maybeOf(context);
@@ -766,6 +779,48 @@ class _MainScreenState extends State<MainScreen>
         ),
       );
     }
+  }
+
+  /// После запуска: трей / закрытие через 5 с / ничего.
+  Future<void> _applyLaunchPostAction(LauncherController controller) async {
+    switch (controller.launchPostAction) {
+      case LaunchPostAction.minimizeToTray:
+        if (Platform.isWindows) {
+          await TrayService.instance.hideToTray();
+        } else if (Platform.isLinux || Platform.isMacOS) {
+          await windowManager.minimize();
+        }
+        break;
+      case LaunchPostAction.closeAfterCountdown:
+        _startLaunchCloseCountdown();
+        break;
+      case LaunchPostAction.none:
+        break;
+    }
+  }
+
+  void _startLaunchCloseCountdown() {
+    _launchCloseTimer?.cancel();
+    setState(() => _launchCloseCountdown = 5);
+    _launchCloseTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      final next = (_launchCloseCountdown ?? 1) - 1;
+      if (next <= 0) {
+        timer.cancel();
+        setState(() => _launchCloseCountdown = null);
+        if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+          windowManager.close();
+        } else {
+          // Android: просто свернуть приложение.
+          SystemNavigator.pop();
+        }
+      } else {
+        setState(() => _launchCloseCountdown = next);
+      }
+    });
   }
 
   /// Фоном обновляет только те УСТАНОВЛЕННЫЕ компоненты, где есть новая версия.
@@ -788,73 +843,28 @@ class _MainScreenState extends State<MainScreen>
 
   Future<void> _openAboutProjectPage() async {
     if (!mounted) return;
-    await Navigator.of(context).push(
-      PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            const AboutProjectPage(),
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          const begin = Offset(1.0, 0.0);
-          const end = Offset.zero;
-          final tween = Tween(
-            begin: begin,
-            end: end,
-          ).chain(CurveTween(curve: Curves.easeOutCubic));
-          return SlideTransition(
-            position: animation.drive(tween),
-            child: child,
-          );
-        },
-        transitionDuration: const Duration(milliseconds: 260),
-        reverseTransitionDuration: const Duration(milliseconds: 220),
-      ),
+    await pushAppPage(
+      context,
+      const AboutProjectPage(),
+      animate: _controller?.animationsEnabled ?? true,
     );
   }
 
   Future<void> _openSettingsPage() async {
     if (!mounted) return;
-    await Navigator.of(context).push(
-      PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            const SettingsPage(),
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          const begin = Offset(1.0, 0.0);
-          const end = Offset.zero;
-          final tween = Tween(
-            begin: begin,
-            end: end,
-          ).chain(CurveTween(curve: Curves.easeOutCubic));
-          return SlideTransition(
-            position: animation.drive(tween),
-            child: child,
-          );
-        },
-        transitionDuration: const Duration(milliseconds: 260),
-        reverseTransitionDuration: const Duration(milliseconds: 220),
-      ),
+    await pushAppPage(
+      context,
+      const SettingsPage(),
+      animate: _controller?.animationsEnabled ?? true,
     );
   }
 
   Future<void> _openGiftCodesPage() async {
     if (!mounted) return;
-    await Navigator.of(context).push(
-      PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            const GiftCodesPage(),
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          const begin = Offset(1.0, 0.0);
-          const end = Offset.zero;
-          final tween = Tween(
-            begin: begin,
-            end: end,
-          ).chain(CurveTween(curve: Curves.easeOutCubic));
-          return SlideTransition(
-            position: animation.drive(tween),
-            child: child,
-          );
-        },
-        transitionDuration: const Duration(milliseconds: 260),
-        reverseTransitionDuration: const Duration(milliseconds: 220),
-      ),
+    await pushAppPage(
+      context,
+      const GiftCodesPage(),
+      animate: _controller?.animationsEnabled ?? true,
     );
   }
 
@@ -968,6 +978,9 @@ class _MainScreenState extends State<MainScreen>
   }
 
   String _primaryActionLabel(LauncherController controller) {
+    if (_launchCloseCountdown != null) {
+      return 'Закрытие через ${_launchCloseCountdown!}…';
+    }
     if (controller.isDownloading) {
       final pct = (controller.downloadProgress * 100).toStringAsFixed(0);
       return 'Загрузка $pct%';
@@ -991,6 +1004,7 @@ class _MainScreenState extends State<MainScreen>
   }
 
   bool _primaryActionEnabled(LauncherController controller) {
+    if (_launchCloseCountdown != null) return false;
     if (controller.isDownloading) return false;
     if (!Platform.isAndroid && !controller.isInstallPathValid) return false;
     if (controller.hasAnyComponentUpdate) return true;
@@ -1806,19 +1820,37 @@ class _MainScreenState extends State<MainScreen>
     );
   }
 
-  /// Статичная обложка с градиентным фолбэком, если картинки нет.
+  /// Статичная обложка: своя картинка → выбранный слот → cover.jpg.
   Widget _staticCover(LauncherController controller) {
+    final custom = controller.customCoverPath;
+    if (custom != null && custom.isNotEmpty) {
+      return Image.file(
+        File(custom),
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _staticCoverAsset(controller),
+      );
+    }
+    return _staticCoverAsset(controller);
+  }
+
+  Widget _staticCoverAsset(LauncherController controller) {
+    final idx = controller.staticCoverIndex.clamp(0, staticCovers.length - 1);
+    final asset = staticCovers[idx].asset;
     return Image.asset(
-      'assets/images/cover.jpg',
+      asset,
       fit: BoxFit.cover,
-      errorBuilder: (context, error, stackTrace) => DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: controller.isDarkMode
-                ? [const Color(0xFF3A2B6E), const Color(0xFF1B1430)]
-                : [const Color(0xFF8C6D3B), const Color(0xFF4A351A)],
+      errorBuilder: (context, error, stackTrace) => Image.asset(
+        'assets/images/cover.jpg',
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: controller.isDarkMode
+                  ? [const Color(0xFF3A2B6E), const Color(0xFF1B1430)]
+                  : [const Color(0xFF8C6D3B), const Color(0xFF4A351A)],
+            ),
           ),
         ),
       ),

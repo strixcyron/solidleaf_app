@@ -14,10 +14,25 @@ import '../config/app_constants.dart';
 import '../config/github_config.dart';
 import '../services/cover_accent_loader.dart';
 import '../services/game_path_finder.dart';
+import '../services/notification_service.dart';
 import '../services/process_tracker_service.dart';
 import '../telegram_auth_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/install_errors.dart';
+
+/// Что делать с лаунчером после запуска игры.
+enum LaunchPostAction {
+  none,
+  minimizeToTray,
+  closeAfterCountdown,
+}
+
+/// Режим воспроизведения в мини-плеере.
+enum PlaybackMode {
+  all,
+  favorites,
+  shuffle,
+}
 
 class LauncherController extends ChangeNotifier {
   final Dio _dio = Dio(
@@ -46,6 +61,24 @@ class LauncherController extends ChangeNotifier {
   /// Индекс выбранной анимированной обложки (0..6).
   int animatedCoverIndex = 0;
 
+  /// Индекс статичной обложки (0..9).
+  int staticCoverIndex = 0;
+
+  /// Путь к пользовательской обложке (файл на диске), null — из ассетов.
+  String? customCoverPath;
+
+  /// Действие после запуска игры.
+  LaunchPostAction launchPostAction = LaunchPostAction.none;
+
+  /// Фоновая проверка обновлений.
+  bool backgroundUpdateCheck = true;
+
+  /// Избранные треки (по fileName).
+  Set<String> favoriteTrackIds = {};
+
+  /// Режим плейлиста: all / favorites / shuffle.
+  PlaybackMode playbackMode = PlaybackMode.all;
+
   /// Выбранный пресет темы.
   AppThemePreset themePreset = AppThemePreset.dynamicCover;
 
@@ -69,10 +102,16 @@ class LauncherController extends ChangeNotifier {
   /// Windows: ждём запуска Reverse1999.exe для автоопределения пути.
   bool isWaitingForGameProcess = false;
 
+  /// Игра сейчас запущена (после старта из лаунчера / пока процесс жив).
+  bool isGameRunning = false;
+
   /// Кратковременный флаг «путь только что пойман» — для анимации в UI.
   bool gamePathJustDetected = false;
 
   final ProcessTrackerService _processTracker = ProcessTrackerService();
+  Timer? _gameRunningWatch;
+  bool _gameRunningProbeInFlight = false;
+  bool _sawGameProcessAfterLaunch = false;
   String currentVersion = 'v0.0.0';
   String currentArtVersion = 'v0.0.0';
   String remoteVersion = '—';
@@ -380,6 +419,8 @@ class LauncherController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _updatePollTimer?.cancel();
+    stopGameRunningWatch();
     stopGameProcessWatch();
     telegramAuth.dispose();
     super.dispose();
@@ -394,6 +435,26 @@ class LauncherController extends ChangeNotifier {
     animatedCoverIndex = (prefs.getInt('animated_cover_index') ?? 0).clamp(
       0,
       6,
+    );
+    staticCoverIndex = (prefs.getInt('static_cover_index') ?? 0).clamp(0, 9);
+    customCoverPath = prefs.getString('custom_cover_path');
+    if (customCoverPath != null &&
+        customCoverPath!.isNotEmpty &&
+        !File(customCoverPath!).existsSync()) {
+      customCoverPath = null;
+    }
+    final launchActionName = prefs.getString('launch_post_action');
+    launchPostAction = LaunchPostAction.values.firstWhere(
+      (e) => e.name == launchActionName,
+      orElse: () => LaunchPostAction.none,
+    );
+    backgroundUpdateCheck = prefs.getBool('background_update_check') ?? true;
+    favoriteTrackIds = (prefs.getStringList('favorite_tracks') ?? const [])
+        .toSet();
+    final playbackName = prefs.getString('playback_mode');
+    playbackMode = PlaybackMode.values.firstWhere(
+      (e) => e.name == playbackName,
+      orElse: () => PlaybackMode.all,
     );
     final presetName = prefs.getString('theme_preset');
     themePreset = AppThemePreset.values.firstWhere(
@@ -439,6 +500,52 @@ class LauncherController extends ChangeNotifier {
     }
     coverAccent = await CoverAccentLoader.load();
     notifyListeners();
+    _startBackgroundUpdatePolling();
+  }
+
+  Timer? _updatePollTimer;
+  bool _updateNotifySent = false;
+
+  void _startBackgroundUpdatePolling() {
+    _updatePollTimer?.cancel();
+    if (!backgroundUpdateCheck) return;
+    _updatePollTimer = Timer.periodic(const Duration(hours: 1), (_) {
+      unawaited(_pollUpdatesInBackground());
+    });
+    Future<void>.delayed(const Duration(minutes: 2), () {
+      if (backgroundUpdateCheck) {
+        unawaited(_pollUpdatesInBackground());
+      }
+    });
+  }
+
+  Future<void> _pollUpdatesInBackground() async {
+    try {
+      final hadText = hasUpdate;
+      final hadArt = hasArtUpdate;
+      await checkForUpdates();
+      if (isPremium) {
+        await checkForArtUpdates();
+      }
+      final newlyFound = (!hadText && hasUpdate) || (!hadArt && hasArtUpdate);
+      if (newlyFound || ((hasUpdate || hasArtUpdate) && !_updateNotifySent)) {
+        _updateNotifySent = true;
+        final parts = <String>[];
+        if (hasUpdate) parts.add('текст $remoteVersion');
+        if (hasArtUpdate) parts.add('графика $remoteArtVersion');
+        await NotificationService.instance.showUpdateAvailable(
+          title: 'Доступно обновление SolidLeaf',
+          body: parts.isEmpty
+              ? 'Найдена новая версия русификатора'
+              : 'Обновление: ${parts.join(', ')}',
+        );
+      }
+      if (!hasUpdate && !hasArtUpdate) {
+        _updateNotifySent = false;
+      }
+    } catch (e) {
+      addLog('Фоновая проверка обновлений: $e');
+    }
   }
 
   /// Ключ первого запуска: true, пока пользователь не закрыл Welcome-диалог.
@@ -512,6 +619,61 @@ class LauncherController extends ChangeNotifier {
     animatedCoverIndex = index.clamp(0, 6);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('animated_cover_index', animatedCoverIndex);
+    notifyListeners();
+  }
+
+  Future<void> setStaticCoverIndex(int index) async {
+    staticCoverIndex = index.clamp(0, 9);
+    customCoverPath = null;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('static_cover_index', staticCoverIndex);
+    await prefs.remove('custom_cover_path');
+    notifyListeners();
+  }
+
+  Future<void> setCustomCoverPath(String? path) async {
+    customCoverPath = path;
+    final prefs = await SharedPreferences.getInstance();
+    if (path == null || path.isEmpty) {
+      await prefs.remove('custom_cover_path');
+    } else {
+      await prefs.setString('custom_cover_path', path);
+    }
+    notifyListeners();
+  }
+
+  Future<void> setLaunchPostAction(LaunchPostAction action) async {
+    launchPostAction = action;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('launch_post_action', action.name);
+    notifyListeners();
+  }
+
+  Future<void> setBackgroundUpdateCheck(bool value) async {
+    backgroundUpdateCheck = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('background_update_check', value);
+    notifyListeners();
+    _startBackgroundUpdatePolling();
+  }
+
+  Future<void> toggleFavoriteTrack(String fileName) async {
+    if (favoriteTrackIds.contains(fileName)) {
+      favoriteTrackIds.remove(fileName);
+    } else {
+      favoriteTrackIds.add(fileName);
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('favorite_tracks', favoriteTrackIds.toList());
+    notifyListeners();
+  }
+
+  bool isFavoriteTrack(String fileName) => favoriteTrackIds.contains(fileName);
+
+  Future<void> setPlaybackMode(PlaybackMode mode) async {
+    playbackMode = mode;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('playback_mode', mode.name);
     notifyListeners();
   }
 
@@ -1724,6 +1886,63 @@ class LauncherController extends ChangeNotifier {
     statusText = 'Игра запущена';
     addLog('Запуск игры: $exe');
     notifyListeners();
+    startGameRunningWatch();
+  }
+
+  /// Следит за процессом игры после запуска из лаунчера.
+  /// Когда процесс исчез — обновляет статус «Последняя активность».
+  void startGameRunningWatch() {
+    if (!Platform.isWindows) return;
+    stopGameRunningWatch();
+    isGameRunning = true;
+    _sawGameProcessAfterLaunch = false;
+    final startedAt = DateTime.now();
+    _gameRunningWatch = Timer.periodic(const Duration(seconds: 2), (_) {
+      unawaited(_tickGameRunningWatch(startedAt));
+    });
+    Future<void>.delayed(const Duration(seconds: 2), () {
+      unawaited(_tickGameRunningWatch(startedAt));
+    });
+  }
+
+  Future<void> _tickGameRunningWatch(DateTime startedAt) async {
+    if (_gameRunningWatch == null || _gameRunningProbeInFlight) return;
+    _gameRunningProbeInFlight = true;
+    try {
+      final running = await ProcessTrackerService.isGameProcessRunning();
+      if (running) {
+        _sawGameProcessAfterLaunch = true;
+        if (!isGameRunning || statusText != 'Игра запущена') {
+          isGameRunning = true;
+          statusText = 'Игра запущена';
+          notifyListeners();
+        }
+        return;
+      }
+
+      final waited = DateTime.now().difference(startedAt);
+      // Ждём появления процесса после старта (до ~20 с), потом считаем выход.
+      if (!_sawGameProcessAfterLaunch && waited < const Duration(seconds: 20)) {
+        return;
+      }
+
+      isGameRunning = false;
+      stopGameRunningWatch();
+      statusText = 'Игра закрыта';
+      addLog(
+        _sawGameProcessAfterLaunch
+            ? 'Процесс игры завершён'
+            : 'Процесс игры не обнаружен / уже закрыт',
+      );
+      notifyListeners();
+    } finally {
+      _gameRunningProbeInFlight = false;
+    }
+  }
+
+  void stopGameRunningWatch() {
+    _gameRunningWatch?.cancel();
+    _gameRunningWatch = null;
   }
 
   Future<void> installOrUpdate() async {

@@ -1,8 +1,13 @@
+import 'dart:math' as math;
+
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:text_scroll/text_scroll.dart';
 
+import '../controllers/launcher_controller.dart';
 import '../models/audio_track.dart';
+import '../utils/app_dialogs.dart';
 import 'effects/audio_visualizer.dart';
 import 'effects/magnetic_hover.dart';
 import 'effects/parallax_cover.dart';
@@ -96,19 +101,49 @@ class _MiniPlayerState extends State<MiniPlayer>
           coverAsset: 'assets/images/music_cover/polar_night.jpg',
           durationStr: '3:53',
         ),
-          AudioTrack(
+        AudioTrack(
           title: 'Polar Night (Instrumental)',
           fileName: 'Polar Night (Instrumental).mp3',
           coverAsset: 'assets/images/music_cover/polar_night.jpg',
           durationStr: '3:53',
         ),
+        AudioTrack(
+          title: 'A Farewell',
+          fileName: 'A Farewell.mp3',
+          coverAsset: 'assets/images/music_cover/polar_night.jpg',
+          durationStr: '—',
+        ),
+        AudioTrack(
+          title: 'A New World',
+          fileName: 'A New World.mp3',
+          coverAsset: 'assets/images/music_cover/polar_night.jpg',
+          durationStr: '—',
+        ),
       ],
     ),
   ];
 
-  // Плоский список всех треков для переключения кнопками Next/Prev
+  // Плоский список всех треков.
   List<AudioTrack> get allTracks =>
       albums.expand((album) => album.tracks).toList();
+
+  /// Очередь с учётом избранного / shuffle.
+  List<AudioTrack> _queueFor(LauncherController ctrl) {
+    var list = List<AudioTrack>.from(allTracks);
+    if (ctrl.playbackMode == PlaybackMode.favorites) {
+      final fav = list
+          .where((t) => ctrl.isFavoriteTrack(t.fileName))
+          .toList();
+      if (fav.isNotEmpty) list = fav;
+    }
+    if (ctrl.playbackMode == PlaybackMode.shuffle) {
+      list = List<AudioTrack>.from(list)..shuffle(math.Random());
+    }
+    return list;
+  }
+
+  AudioTrack get currentTrack => allTracks[
+      currentIndex.clamp(0, allTracks.isEmpty ? 0 : allTracks.length - 1)];
 
   int currentIndex = 0;
 
@@ -158,38 +193,37 @@ class _MiniPlayerState extends State<MiniPlayer>
   }
 
   void nextTrack() async {
-    await player.stop();
-    setState(() {
-      currentIndex = (currentIndex + 1) % allTracks.length;
-      isPlaying = false;
-      _position = Duration.zero;
-    });
-    togglePlay();
+    if (allTracks.isEmpty) return;
+    final ctrl = context.read<LauncherController>();
+    final queue = _queueFor(ctrl);
+    final current = allTracks[currentIndex];
+    var qi = queue.indexWhere((t) => t.fileName == current.fileName);
+    if (qi < 0) qi = 0;
+    final next = queue[(qi + 1) % queue.length];
+    await playSpecificTrack(next);
   }
 
   void prevTrack() async {
+    if (allTracks.isEmpty) return;
+    final ctrl = context.read<LauncherController>();
+    final queue = _queueFor(ctrl);
+    final current = allTracks[currentIndex];
+    var qi = queue.indexWhere((t) => t.fileName == current.fileName);
+    if (qi < 0) qi = 0;
+    final prev = queue[(qi - 1 < 0) ? queue.length - 1 : qi - 1];
+    await playSpecificTrack(prev);
+  }
+
+  Future<void> playSpecificTrack(AudioTrack track) async {
+    final index = allTracks.indexWhere((t) => t.fileName == track.fileName);
+    if (index == -1) return;
     await player.stop();
     setState(() {
-      currentIndex = (currentIndex - 1 < 0)
-          ? allTracks.length - 1
-          : currentIndex - 1;
+      currentIndex = index;
       isPlaying = false;
       _position = Duration.zero;
     });
     togglePlay();
-  }
-
-  void playSpecificTrack(AudioTrack track) async {
-    int index = allTracks.indexOf(track);
-    if (index != -1) {
-      await player.stop();
-      setState(() {
-        currentIndex = index;
-        isPlaying = false;
-        _position = Duration.zero;
-      });
-      togglePlay();
-    }
   }
 
   String _formatDuration(Duration d) {
@@ -198,272 +232,172 @@ class _MiniPlayerState extends State<MiniPlayer>
     return '$minutes:$seconds';
   }
 
-// Окно с альбомами и треками
-  void _showPlaylist() {
-    showDialog(
+
+  /// Плейлист в стиле bottom sheet (как инструкция Shizuku).
+  Future<void> _showPlaylist() async {
+    final ctrl = context.read<LauncherController>();
+    Album? selectedAlbum;
+
+    await showAppBottomSheet<void>(
       context: context,
       builder: (ctx) {
-        Album? selectedAlbum;
-
         return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              backgroundColor: Theme.of(context).cardColor,
-              title: Row(
-                children: [
-                  if (selectedAlbum != null)
-                    IconButton(
-                      icon: const Icon(Icons.arrow_back),
-                      onPressed: () => setDialogState(() => selectedAlbum = null),
-                    ),
-                  Text(
-                    // Если альбом открыт, можно написать "Назад" или оставить название
-                    selectedAlbum == null ? 'Альбомы' : 'Альбом',
-                    style: TextStyle(
-                      color: Theme.of(context).textTheme.bodyMedium?.color,
-                      fontSize: 18,
-                    ),
-                  ),
-                ],
-              ),
-              content: SizedBox(
-                width: 360,
-                height: 500, // Увеличил высоту, чтобы влезла квадратная обложка и треки
-                child: selectedAlbum == null
-                    // --- Список альбомов (до открытия) ---
-                    ? ListView.separated(
-                        itemCount: albums.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 10),
-                        itemBuilder: (context, index) {
-                          final album = albums[index];
-                          return InkWell(
-                            borderRadius: BorderRadius.circular(12),
-                            onTap: () {
-                              setDialogState(() {
-                                selectedAlbum = album;
-                              });
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: Theme.of(context).dividerColor,
-                                ),
-                              ),
-                              child: Row(
-                                children: [
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: Image.asset(
-                                      album.coverAsset,
-                                      width: 45,
-                                      height: 45,
-                                      fit: BoxFit.cover,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          album.title,
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            color: Theme.of(context)
-                                                .textTheme
-                                                .bodyMedium
-                                                ?.color,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          'Год: ${album.year} • Треков: ${album.tracks.length}',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: Theme.of(context)
-                                                .textTheme
-                                                .bodySmall
-                                                ?.color,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const Icon(Icons.chevron_right),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
-                      )
-                    // --- Содержимое выбранного альбома ---
-                    : Column(
+          builder: (context, setSheetState) {
+            final textColor = Theme.of(context).textTheme.bodyMedium?.color;
+            final maxH = MediaQuery.sizeOf(context).height * 0.75;
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxHeight: maxH),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      appSheetHandle(context),
+                      Row(
                         children: [
-                          // Шапка альбома (Квадратная обложка с градиентом)
-                          Center(
-                            child: ParallaxCover(
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(12),
-                                child: SizedBox(
-                                  width: 355,
-                                  height: 300,
-                                  child: Stack(
-                                    fit: StackFit.expand,
-                                    children: [
-                                      Image.asset(
-                                        selectedAlbum!.coverAsset,
-                                        fit: BoxFit.cover,
-                                      ),
-                                    // Градиентное затемнение (плавно от центра к низу)
-                                    DecoratedBox(
-                                      decoration: BoxDecoration(
-                                        gradient: LinearGradient(
-                                          begin: Alignment.topCenter,
-                                          end: Alignment.bottomCenter,
-                                          colors: [
-                                            Colors.transparent,
-                                            Colors.black.withValues(alpha: 0.1),
-                                            Colors.black.withValues(alpha: 0.85),
-                                          ],
-                                          stops: const [0.4, 0.7, 1.0],
-                                        ),
-                                      ),
-                                    ),
-                                    // Текст поверх затемнения
-                                    Positioned(
-                                      left: 16,
-                                      right: 16,
-                                      bottom: 16,
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Text(
-                                            selectedAlbum!.title,
-                                            style: const TextStyle(
-                                              fontSize: 20,
-                                              fontWeight: FontWeight.bold,
-                                              color: Colors.white, // Белый для контраста
-                                            ),
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            'Выпуск: ${selectedAlbum!.year} год',
-                                            style: TextStyle(
-                                              fontSize: 13,
-                                              color: Colors.white.withValues(alpha: 0.8),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                          if (selectedAlbum != null)
+                            IconButton(
+                              icon: const Icon(Icons.arrow_back_rounded),
+                              onPressed: () =>
+                                  setSheetState(() => selectedAlbum = null),
+                            ),
+                          Expanded(
+                            child: Text(
+                              selectedAlbum == null
+                                  ? 'Альбомы и треки'
+                                  : selectedAlbum!.title,
+                              style: TextStyle(
+                                color: textColor,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
                           ),
-                          ),
-                          const Divider(height: 20),
-                          // Список треков альбома
-                          Expanded(
-                            child: ListView.separated(
-                              itemCount: selectedAlbum!.tracks.length,
-                              separatorBuilder: (_, __) =>
-                                  const SizedBox(height: 6),
-                              itemBuilder: (context, index) {
-                                final track = selectedAlbum!.tracks[index];
-                                final isCurrent =
-                                    allTracks[currentIndex] == track;
-
-                                return InkWell(
-                                  borderRadius: BorderRadius.circular(8),
-                                  onTap: () {
-                                    Navigator.pop(ctx);
-                                    playSpecificTrack(track);
-                                  },
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 6,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: isCurrent
-                                          ? Theme.of(context)
-                                              .colorScheme
-                                              .primary
-                                              .withValues(alpha: 0.15)
-                                          : Colors.transparent,
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(
-                                        color: isCurrent
-                                            ? Theme.of(context)
-                                                .colorScheme
-                                                .primary
-                                            : Colors.transparent,
-                                      ),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Icon(
-                                          isCurrent
-                                              ? Icons.graphic_eq
-                                              : Icons.music_note,
-                                          size: 18,
-                                          color: isCurrent
-                                              ? Theme.of(context)
-                                                  .colorScheme
-                                                  .primary
-                                              : Theme.of(context)
-                                                  .textTheme
-                                                  .bodySmall
-                                                  ?.color,
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          child: Text(
-                                            track.title,
-                                            style: TextStyle(
-                                              fontWeight: isCurrent
-                                                  ? FontWeight.bold
-                                                  : FontWeight.normal,
-                                              color: Theme.of(context)
-                                                  .textTheme
-                                                  .bodyMedium
-                                                  ?.color,
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                        Text(
-                                          track.durationStr,
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: Theme.of(context)
-                                                .textTheme
-                                                .bodySmall
-                                                ?.color,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              },
+                          IconButton(
+                            tooltip: 'Только избранные',
+                            icon: Icon(
+                              Icons.favorite_rounded,
+                              color: ctrl.playbackMode == PlaybackMode.favorites
+                                  ? Colors.redAccent
+                                  : Theme.of(context).textTheme.bodySmall?.color,
                             ),
+                            onPressed: () async {
+                              await ctrl.setPlaybackMode(
+                                ctrl.playbackMode == PlaybackMode.favorites
+                                    ? PlaybackMode.all
+                                    : PlaybackMode.favorites,
+                              );
+                              setSheetState(() {});
+                            },
+                          ),
+                          IconButton(
+                            tooltip: 'Случайный порядок',
+                            icon: Icon(
+                              Icons.shuffle_rounded,
+                              color: ctrl.playbackMode == PlaybackMode.shuffle
+                                  ? Theme.of(context).colorScheme.primary
+                                  : Theme.of(context).textTheme.bodySmall?.color,
+                            ),
+                            onPressed: () async {
+                              await ctrl.setPlaybackMode(
+                                ctrl.playbackMode == PlaybackMode.shuffle
+                                    ? PlaybackMode.all
+                                    : PlaybackMode.shuffle,
+                              );
+                              setSheetState(() {});
+                            },
                           ),
                         ],
                       ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  child: const Text('Закрыть'),
+                      const SizedBox(height: 8),
+                      Flexible(
+                        child: selectedAlbum == null
+                            ? ListView.separated(
+                                shrinkWrap: true,
+                                itemCount: albums.length,
+                                separatorBuilder: (_, __) =>
+                                    const SizedBox(height: 10),
+                                itemBuilder: (context, index) {
+                                  final album = albums[index];
+                                  return ListTile(
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      side: BorderSide(
+                                        color: Theme.of(context).dividerColor,
+                                      ),
+                                    ),
+                                    leading: ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Image.asset(
+                                        album.coverAsset,
+                                        width: 48,
+                                        height: 48,
+                                        fit: BoxFit.cover,
+                                      ),
+                                    ),
+                                    title: Text(album.title),
+                                    subtitle: Text(
+                                      '${album.year} · ${album.tracks.length} треков',
+                                    ),
+                                    trailing: const Icon(Icons.chevron_right),
+                                    onTap: () => setSheetState(
+                                      () => selectedAlbum = album,
+                                    ),
+                                  );
+                                },
+                              )
+                            : ListView.builder(
+                                shrinkWrap: true,
+                                itemCount: selectedAlbum!.tracks.length,
+                                itemBuilder: (context, index) {
+                                  final track = selectedAlbum!.tracks[index];
+                                  final fav =
+                                      ctrl.isFavoriteTrack(track.fileName);
+                                  final playing =
+                                      allTracks[currentIndex].fileName ==
+                                          track.fileName;
+                                  return ListTile(
+                                    leading: Icon(
+                                      playing
+                                          ? Icons.equalizer_rounded
+                                          : Icons.music_note_rounded,
+                                      color: playing
+                                          ? Theme.of(context)
+                                              .colorScheme
+                                              .primary
+                                          : null,
+                                    ),
+                                    title: Text(track.title),
+                                    subtitle: Text(track.durationStr),
+                                    trailing: IconButton(
+                                      icon: Icon(
+                                        fav
+                                            ? Icons.favorite_rounded
+                                            : Icons.favorite_border_rounded,
+                                        color: fav ? Colors.redAccent : null,
+                                      ),
+                                      onPressed: () async {
+                                        await ctrl.toggleFavoriteTrack(
+                                          track.fileName,
+                                        );
+                                        setSheetState(() {});
+                                        setState(() {});
+                                      },
+                                    ),
+                                    onTap: () {
+                                      Navigator.of(context).pop();
+                                      playSpecificTrack(track);
+                                    },
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
                 ),
-              ],
+              ),
             );
           },
         );
@@ -607,7 +541,11 @@ class _MiniPlayerState extends State<MiniPlayer>
                     children: [
                       Padding(
                         padding: const EdgeInsets.only(top: 6),
-                        child: AudioVisualizer(isPlaying: isPlaying),
+                        child: AudioVisualizer(
+                          isPlaying: isPlaying,
+                          expanded: true,
+                          height: 28,
+                        ),
                       ),
 
 // Прогресс-бар длительности
@@ -680,6 +618,23 @@ class _MiniPlayerState extends State<MiniPlayer>
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
+              Consumer<LauncherController>(
+                builder: (context, ctrl, _) {
+                  final fav = ctrl.isFavoriteTrack(
+                    allTracks[currentIndex].fileName,
+                  );
+                  return IconButton(
+                    tooltip: fav ? 'Убрать из избранного' : 'В избранное',
+                    icon: Icon(
+                      fav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                      color: fav ? Colors.redAccent : null,
+                    ),
+                    onPressed: () => ctrl.toggleFavoriteTrack(
+                      allTracks[currentIndex].fileName,
+                    ),
+                  );
+                },
+              ),
               IconButton(
                 icon: const Icon(Icons.skip_previous_rounded),
                 color: Theme.of(context).textTheme.bodyMedium?.color,
@@ -710,6 +665,37 @@ class _MiniPlayerState extends State<MiniPlayer>
                 icon: const Icon(Icons.skip_next_rounded),
                 color: Theme.of(context).textTheme.bodyMedium?.color,
                 onPressed: nextTrack,
+              ),
+              Consumer<LauncherController>(
+                builder: (context, ctrl, _) {
+                  final shuffle = ctrl.playbackMode == PlaybackMode.shuffle;
+                  final favOnly = ctrl.playbackMode == PlaybackMode.favorites;
+                  return IconButton(
+                    tooltip: shuffle
+                        ? 'Случайный порядок'
+                        : favOnly
+                            ? 'Только избранные'
+                            : 'Режим воспроизведения',
+                    icon: Icon(
+                      shuffle
+                          ? Icons.shuffle_on_rounded
+                          : favOnly
+                              ? Icons.favorite_rounded
+                              : Icons.repeat_rounded,
+                      color: (shuffle || favOnly)
+                          ? Theme.of(context).colorScheme.primary
+                          : Theme.of(context).textTheme.bodySmall?.color,
+                    ),
+                    onPressed: () {
+                      final next = switch (ctrl.playbackMode) {
+                        PlaybackMode.all => PlaybackMode.favorites,
+                        PlaybackMode.favorites => PlaybackMode.shuffle,
+                        PlaybackMode.shuffle => PlaybackMode.all,
+                      };
+                      ctrl.setPlaybackMode(next);
+                    },
+                  );
+                },
               ),
             ],
           ),

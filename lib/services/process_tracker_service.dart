@@ -61,6 +61,46 @@ class ProcessTrackerService {
     _timer = null;
   }
 
+  /// Есть ли сейчас процесс игры (без пути к exe).
+  static Future<bool> isGameProcessRunning() async {
+    if (!Platform.isWindows) return false;
+
+    for (final name in processNames) {
+      try {
+        final result = await Process.run(
+          'powershell',
+          [
+            '-NoProfile',
+            '-NonInteractive',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-Command',
+            "(Get-Process -Name '$name' -ErrorAction SilentlyContinue | "
+                'Measure-Object).Count',
+          ],
+          runInShell: false,
+        );
+        if (result.exitCode != 0) continue;
+        final count =
+            int.tryParse((result.stdout as String?)?.trim() ?? '') ?? 0;
+        if (count > 0) return true;
+      } catch (_) {}
+    }
+
+    // Фолбэк: tasklist (быстрее и надёжнее на части сборок).
+    try {
+      final result = await Process.run(
+        'tasklist',
+        ['/FI', 'IMAGENAME eq reverse1999.exe', '/NH'],
+        runInShell: true,
+      );
+      final out = ((result.stdout as String?) ?? '').toLowerCase();
+      if (out.contains('reverse1999.exe')) return true;
+    } catch (_) {}
+
+    return false;
+  }
+
   /// Ищет ExecutablePath процесса Reverse1999 через PowerShell.
   static Future<String?> findRunningGameExecutablePath() async {
     if (!Platform.isWindows) return null;

@@ -1,11 +1,16 @@
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import '../controllers/launcher_controller.dart';
 import '../data/animated_covers.dart';
+import '../data/static_covers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/animated_cover_view.dart';
 import '../widgets/remove_localization_dialog.dart';
@@ -114,7 +119,6 @@ class SettingsPage extends StatelessWidget {
                     value: controller.animatedCoverEnabled,
                     onChanged: controller.setAnimatedCover,
                   ),
-                  // Выбор одной из 7 анимированных обложек.
                   AnimatedSize(
                     duration: const Duration(milliseconds: 250),
                     curve: Curves.easeInOut,
@@ -129,7 +133,73 @@ class SettingsPage extends StatelessWidget {
                           )
                         : const SizedBox(width: double.infinity),
                   ),
+                  const Divider(height: 1),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10, bottom: 6),
+                    child: _StaticCoverPicker(controller: controller),
+                  ),
                 ],
+              ),
+            ),
+            const SizedBox(height: 24),
+            _sectionTitle(context, 'После запуска игры'),
+            const SizedBox(height: 12),
+            _settingsCard(
+              context,
+              child: Column(
+                children: [
+                  for (final entry in const [
+                    (
+                      LaunchPostAction.none,
+                      'Ничего не делать',
+                      'Лаунчер остаётся открытым',
+                      Icons.do_not_disturb_alt_rounded,
+                    ),
+                    (
+                      LaunchPostAction.minimizeToTray,
+                      'Свернуть в трей',
+                      'Windows: иконка в системном трее',
+                      Icons.minimize_rounded,
+                    ),
+                    (
+                      LaunchPostAction.closeAfterCountdown,
+                      'Закрыть через 5 секунд',
+                      'На кнопке запуска будет обратный отсчёт',
+                      Icons.timer_outlined,
+                    ),
+                  ]) ...[
+                    if (entry.$1 != LaunchPostAction.none)
+                      const Divider(height: 1),
+                    RadioListTile<LaunchPostAction>(
+                      contentPadding: EdgeInsets.zero,
+                      secondary: Icon(entry.$4),
+                      title: Text(entry.$2),
+                      subtitle: Text(entry.$3),
+                      value: entry.$1,
+                      groupValue: controller.launchPostAction,
+                      onChanged: (v) {
+                        if (v != null) controller.setLaunchPostAction(v);
+                      },
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+            _sectionTitle(context, 'Обновления'),
+            const SizedBox(height: 12),
+            _settingsCard(
+              context,
+              child: SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                secondary: const Icon(Icons.notifications_active_outlined),
+                title: const Text('Фоновая проверка обновлений'),
+                subtitle: const Text(
+                  'Периодически проверять новые версии и показывать '
+                  'уведомление',
+                ),
+                value: controller.backgroundUpdateCheck,
+                onChanged: controller.setBackgroundUpdateCheck,
               ),
             ),
             if (Platform.isAndroid) ...[
@@ -488,10 +558,23 @@ class _AccentDot extends StatelessWidget {
 }
 
 /// Горизонтальная лента выбора одной из анимированных обложек.
-class _AnimatedCoverPicker extends StatelessWidget {
+class _AnimatedCoverPicker extends StatefulWidget {
   const _AnimatedCoverPicker({required this.controller});
 
   final LauncherController controller;
+
+  @override
+  State<_AnimatedCoverPicker> createState() => _AnimatedCoverPickerState();
+}
+
+class _AnimatedCoverPickerState extends State<_AnimatedCoverPicker> {
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -499,7 +582,7 @@ class _AnimatedCoverPicker extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Выберите обложку',
+          'Выберите видео-обложку (прокрутите вправо)',
           style: TextStyle(
             fontSize: 12.5,
             fontWeight: FontWeight.w600,
@@ -508,20 +591,226 @@ class _AnimatedCoverPicker extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         SizedBox(
-          height: 104,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: animatedCovers.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 10),
-            itemBuilder: (context, index) {
-              final cover = animatedCovers[index];
-              return _CoverThumb(
-                cover: cover,
-                selected: controller.animatedCoverIndex == index,
-                onTap: () => controller.setAnimatedCoverIndex(index),
-              );
-            },
+          height: 112,
+          child: Scrollbar(
+            controller: _scroll,
+            thumbVisibility: true,
+            trackVisibility: true,
+            scrollbarOrientation: ScrollbarOrientation.bottom,
+            child: Listener(
+              onPointerSignal: (event) {
+                if (event is PointerScrollEvent && _scroll.hasClients) {
+                  final next = (_scroll.offset + event.scrollDelta.dy)
+                      .clamp(0.0, _scroll.position.maxScrollExtent);
+                  _scroll.jumpTo(next);
+                }
+              },
+              child: ListView.separated(
+                controller: _scroll,
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(
+                  parent: AlwaysScrollableScrollPhysics(),
+                ),
+                padding: const EdgeInsets.only(bottom: 10, right: 8),
+                itemCount: animatedCovers.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 10),
+                itemBuilder: (context, index) {
+                  final cover = animatedCovers[index];
+                  return _CoverThumb(
+                    cover: cover,
+                    selected: widget.controller.animatedCoverIndex == index,
+                    onTap: () =>
+                        widget.controller.setAnimatedCoverIndex(index),
+                  );
+                },
+              ),
+            ),
           ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Выбор статичной обложки + отдельная кнопка загрузки своей картинки.
+class _StaticCoverPicker extends StatefulWidget {
+  const _StaticCoverPicker({required this.controller});
+
+  final LauncherController controller;
+
+  @override
+  State<_StaticCoverPicker> createState() => _StaticCoverPickerState();
+}
+
+class _StaticCoverPickerState extends State<_StaticCoverPicker> {
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickCustom(BuildContext context) async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      allowMultiple: false,
+    );
+    if (result == null || result.files.isEmpty) return;
+    final path = result.files.single.path;
+    if (path == null || path.isEmpty) return;
+    try {
+      final support = await getApplicationSupportDirectory();
+      final ext = p.extension(path).isEmpty ? '.jpg' : p.extension(path);
+      final dest = File(p.join(support.path, 'custom_cover$ext'));
+      await File(path).copy(dest.path);
+      await widget.controller.setCustomCoverPath(dest.path);
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось сохранить обложку: $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    final ctrl = widget.controller;
+    final hasCustom =
+        ctrl.customCoverPath != null && ctrl.customCoverPath!.isNotEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Статичная обложка (прокрутите вправо)',
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+            color: Theme.of(context).textTheme.bodySmall?.color,
+          ),
+        ),
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 112,
+          child: Scrollbar(
+            controller: _scroll,
+            thumbVisibility: true,
+            trackVisibility: true,
+            scrollbarOrientation: ScrollbarOrientation.bottom,
+            child: Listener(
+              onPointerSignal: (event) {
+                if (event is PointerScrollEvent && _scroll.hasClients) {
+                  final next = (_scroll.offset + event.scrollDelta.dy)
+                      .clamp(0.0, _scroll.position.maxScrollExtent);
+                  _scroll.jumpTo(next);
+                }
+              },
+              child: ListView.separated(
+                controller: _scroll,
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(
+                  parent: AlwaysScrollableScrollPhysics(),
+                ),
+                padding: const EdgeInsets.only(bottom: 10, right: 8),
+                itemCount: staticCovers.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 10),
+                itemBuilder: (context, index) {
+                  final cover = staticCovers[index];
+                  final selected =
+                      !hasCustom && ctrl.staticCoverIndex == index;
+                  return GestureDetector(
+                    onTap: () => ctrl.setStaticCoverIndex(index),
+                    child: SizedBox(
+                      width: 132,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Container(
+                            height: 74,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: selected
+                                    ? primary
+                                    : Theme.of(context).dividerColor,
+                                width: selected ? 2.5 : 1,
+                              ),
+                            ),
+                            clipBehavior: Clip.antiAlias,
+                            child: Image.asset(
+                              cover.asset,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => const ColoredBox(
+                                color: Colors.black26,
+                                child:
+                                    Icon(Icons.image_not_supported_outlined),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            cover.label,
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.color,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: hasCustom ? primary : Theme.of(context).dividerColor,
+                width: hasCustom ? 2 : 1,
+              ),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: hasCustom
+                ? Image.file(
+                    File(ctrl.customCoverPath!),
+                    fit: BoxFit.cover,
+                  )
+                : Icon(Icons.add_photo_alternate_outlined, color: primary),
+          ),
+          title: Text(hasCustom ? 'Своя обложка' : 'Загрузить свою обложку'),
+          subtitle: Text(
+            hasCustom
+                ? 'Нажмите, чтобы заменить · удерживайте, чтобы сбросить'
+                : 'JPG, PNG или WebP с устройства',
+          ),
+          trailing: hasCustom
+              ? IconButton(
+                  tooltip: 'Сбросить свою обложку',
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => ctrl.setCustomCoverPath(null),
+                )
+              : const Icon(Icons.upload_file_rounded),
+          onTap: () => _pickCustom(context),
+          onLongPress: hasCustom
+              ? () => ctrl.setCustomCoverPath(null)
+              : null,
         ),
       ],
     );
