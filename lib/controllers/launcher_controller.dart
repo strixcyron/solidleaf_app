@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as path;
@@ -793,8 +794,8 @@ class LauncherController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Временный расширенный лог установки через Shizuku (можно выключить).
-  static const bool shizukuInstallDiagEnabled = true;
+  /// Расширенный DIAG установки Shizuku — только debug/profile, в release выключен.
+  static const bool shizukuInstallDiagEnabled = !kReleaseMode;
 
   final List<String> _installDiagLines = [];
 

@@ -52,7 +52,7 @@ class MainActivity : FlutterActivity() {
             .processNameSuffix("filesvc")
             .tag("solidleaf_filesvc")
             .debuggable(false)
-            .version(6)
+            .version(7)
     }
 
     private val userServiceArgsNoDaemon: Shizuku.UserServiceArgs by lazy {
@@ -61,7 +61,7 @@ class MainActivity : FlutterActivity() {
             .processNameSuffix("filesvc2")
             .tag("solidleaf_filesvc_nodaemon")
             .debuggable(false)
-            .version(6)
+            .version(7)
     }
 
     private fun activeUserServiceArgs(): Shizuku.UserServiceArgs =

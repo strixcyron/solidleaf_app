@@ -40,10 +40,13 @@ android {
 
     buildTypes {
         release {
-            // Temporarily disable R8/resource shrinking to avoid release-only Shizuku issues
-            // while validating the app in the current environment.
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // R8 + shrink: keep-правила в proguard-rules.pro (Shizuku UserService/AIDL).
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
