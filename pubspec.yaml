@@ -1,5 +1,5 @@
 name: re_1999_solidleaf
-version: 1.0.0+1
+version: 0.2.0-alpha+2
 
 environment:
   sdk: '^3.13.0'

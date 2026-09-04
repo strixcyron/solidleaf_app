@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../data/launcher_changelog.dart';
 
-/// Компактный бейдж версии лаунчера («v1.0»). По клику открывает диалог
+/// Компактный бейдж версии лаунчера («alpha v0.2»). По клику открывает диалог
 /// с историей изменений лаунчера.
 class LauncherVersionBadge extends StatelessWidget {
   const LauncherVersionBadge({super.key, this.compact = false});
 
-  /// Компактный режим — только «v1.0» без иконки (для узких панелей).
+  /// Компактный режим — короткая подпись без иконки (для узких панелей).
   final bool compact;
 
   @override
@@ -35,7 +35,7 @@ class LauncherVersionBadge extends StatelessWidget {
                   const SizedBox(width: 5),
                 ],
                 Text(
-                  'v$launcherVersion',
+                  launcherVersionLabel,
                   style: TextStyle(
                     color: accent,
                     fontSize: compact ? 11 : 12.5,
@@ -87,7 +87,7 @@ Future<void> showLauncherChangelogDialog(BuildContext context) {
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
-                'v$launcherVersion',
+                launcherVersionLabel,
                 style: TextStyle(
                   color: accent,
                   fontSize: 12,

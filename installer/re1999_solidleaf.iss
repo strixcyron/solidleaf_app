@@ -6,7 +6,7 @@
 ; Готовый установщик появится в installer\output\.
 
 #define MyAppName "SolidLeaf Launcher"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "0.2.0-alpha"
 #define MyAppPublisher "SOLIDLEAF TEAM"
 #define MyAppExeName "re_1999_solidleaf.exe"
 ; Путь к папке релизной сборки Flutter (относительно этого .iss).
