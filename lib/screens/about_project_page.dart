@@ -21,6 +21,17 @@ class AboutProjectPage extends StatelessWidget {
     }
   }
 
+  List<BoxShadow> _cardShadows(BuildContext context) {
+    final shadow = Theme.of(context).colorScheme.shadow;
+    return [
+      BoxShadow(
+        color: shadow.withValues(alpha: 0.10),
+        blurRadius: 12,
+        offset: const Offset(0, 4),
+      ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final textPrimary = Theme.of(context).textTheme.bodyMedium?.color;
@@ -64,8 +75,11 @@ class AboutProjectPage extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 20),
-              _SupportButton(
-                onTap: () => _openLink(context, boostyUrl),
+              _CommunityLinksRow(
+                shadows: _cardShadows(context),
+                onBoosty: () => _openLink(context, boostyUrl),
+                onTelegram: () => _openLink(context, telegramUrl),
+                onMax: () => _openLink(context, maxMessengerUrl),
               ),
               const SizedBox(height: 28),
               for (final section in ProjectTeam.sections) ...[
@@ -75,6 +89,7 @@ class AboutProjectPage extends StatelessWidget {
                   _TeamMemberCard(
                     member: member,
                     roleIcon: section.roleIcon,
+                    shadows: _cardShadows(context),
                     onOpenLink: member.profileUrl == null
                         ? null
                         : () => _openLink(context, member.profileUrl!),
@@ -94,68 +109,139 @@ class AboutProjectPage extends StatelessWidget {
   }
 }
 
-class _SupportButton extends StatelessWidget {
-  const _SupportButton({required this.onTap});
+/// Ряд ссылок: Boosty / Telegram / MAX.
+class _CommunityLinksRow extends StatelessWidget {
+  const _CommunityLinksRow({
+    required this.shadows,
+    required this.onBoosty,
+    required this.onTelegram,
+    required this.onMax,
+  });
 
-  final VoidCallback onTap;
+  final List<BoxShadow> shadows;
+  final VoidCallback onBoosty;
+  final VoidCallback onTelegram;
+  final VoidCallback onMax;
 
   @override
   Widget build(BuildContext context) {
-    // Продолговатая карточка по центру страницы, не на всю ширину.
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 400),
-        child: Material(
-          color: Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(20),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: onTap,
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Theme.of(context).dividerColor),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Theme.of(context).dividerColor),
+            boxShadow: shadows,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Поддержать и связаться',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Theme.of(context).textTheme.bodySmall?.color,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+              const SizedBox(height: 12),
+              Row(
                 children: [
-                  Text(
-                    'Поддержать проект',
-                    style: TextStyle(
-                      color: Theme.of(context).textTheme.bodySmall?.color,
-                      fontSize: 18,
+                  Expanded(
+                    child: _LinkChip(
+                      label: 'Boosty',
+                      assetName: 'boosty_icon.png',
+                      fallbackIcon: Icons.favorite_rounded,
+                      onTap: onBoosty,
                     ),
                   ),
-                  const SizedBox(height: 14),
-                  // Картинка растянута на всю ширину карточки со скруглением.
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(14),
-                    child: Image.asset(
-                      'assets/images/abou_boosty.png',
-                      width: double.infinity,
-                      height: 60,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
-                        width: double.infinity,
-                        height: 85,
-                        alignment: Alignment.center,
-                        color: Theme.of(context)
-                            .colorScheme
-                            .primary
-                            .withValues(alpha: 0.12),
-                        child: Icon(
-                          Icons.favorite_rounded,
-                          size: 48,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
-                      ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _LinkChip(
+                      label: 'Telegram',
+                      assetName: 'telegram_icon.png',
+                      fallbackIcon: Icons.send_rounded,
+                      onTap: onTelegram,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _LinkChip(
+                      label: 'MAX',
+                      fallbackIcon: Icons.chat_rounded,
+                      onTap: onMax,
                     ),
                   ),
                 ],
               ),
-            ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LinkChip extends StatelessWidget {
+  const _LinkChip({
+    required this.label,
+    required this.fallbackIcon,
+    required this.onTap,
+    this.assetName,
+  });
+
+  final String label;
+  final String? assetName;
+  final IconData fallbackIcon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    return Material(
+      color: primary.withValues(alpha: 0.10),
+      borderRadius: BorderRadius.circular(14),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (assetName != null)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.asset(
+                    'assets/images/$assetName',
+                    width: 28,
+                    height: 28,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Icon(
+                      fallbackIcon,
+                      size: 26,
+                      color: primary,
+                    ),
+                  ),
+                )
+              else
+                Icon(fallbackIcon, size: 26, color: primary),
+              const SizedBox(height: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: Theme.of(context).textTheme.bodyMedium?.color,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
           ),
         ),
       ),
@@ -185,12 +271,14 @@ class _TeamMemberCard extends StatelessWidget {
   const _TeamMemberCard({
     required this.member,
     this.roleIcon,
+    this.shadows = const [],
     this.onOpenLink,
     this.onOpenChannel,
   });
 
   final TeamMember member;
   final IconData? roleIcon;
+  final List<BoxShadow> shadows;
   final VoidCallback? onOpenLink;
   final VoidCallback? onOpenChannel;
 
@@ -205,6 +293,7 @@ class _TeamMemberCard extends StatelessWidget {
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Theme.of(context).dividerColor),
+        boxShadow: shadows,
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,

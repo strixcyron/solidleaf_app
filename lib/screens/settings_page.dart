@@ -7,6 +7,8 @@ import 'package:provider/provider.dart';
 import '../controllers/launcher_controller.dart';
 import '../data/animated_covers.dart';
 import '../theme/app_theme.dart';
+import '../widgets/animated_cover_view.dart';
+import '../widgets/remove_localization_dialog.dart';
 
 /// Экран настроек лаунчера: оформление (тема, пресеты, акцентный цвет,
 /// адаптивные цвета), интерфейс (масштаб шрифта) и эффекты (анимации,
@@ -130,6 +132,26 @@ class SettingsPage extends StatelessWidget {
                 ],
               ),
             ),
+            if (Platform.isAndroid) ...[
+              const SizedBox(height: 28),
+              _sectionTitle(context, 'Опасная зона'),
+              const SizedBox(height: 12),
+              _settingsCard(
+                context,
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    Icons.delete_outline_rounded,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                  title: const Text('Удалить русификатор'),
+                  subtitle: const Text(
+                    'Восстановить оригинальные файлы игры из резервной копии',
+                  ),
+                  onTap: () => showRemoveLocalizationDialog(context),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -463,7 +485,7 @@ class _AnimatedCoverPicker extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         SizedBox(
-          height: 96,
+          height: 104,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: animatedCovers.length,
@@ -503,52 +525,55 @@ class _CoverThumb extends StatelessWidget {
       child: SizedBox(
         width: 132,
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Expanded(
-              child: Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: selected ? primary : Theme.of(context).dividerColor,
-                    width: selected ? 2.5 : 1,
-                  ),
+            Container(
+              height: 74,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: selected ? primary : Theme.of(context).dividerColor,
+                  width: selected ? 2.5 : 1,
                 ),
-                clipBehavior: Clip.antiAlias,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    // Живое превью обложки (webp → gif → плейсхолдер).
-                    Image.asset(
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  AnimatedCoverView(
+                    cover: cover,
+                    imageFallback: Image.asset(
                       cover.webp,
                       fit: BoxFit.cover,
                       gaplessPlayback: true,
+                      alignment: Alignment.center,
                       errorBuilder: (_, __, ___) => Image.asset(
                         cover.gif,
                         fit: BoxFit.cover,
                         gaplessPlayback: true,
+                        alignment: Alignment.center,
                         errorBuilder: (_, __, ___) => _placeholder(context),
                       ),
                     ),
-                    if (selected)
-                      Positioned(
-                        top: 4,
-                        right: 4,
-                        child: Container(
-                          padding: const EdgeInsets.all(3),
-                          decoration: BoxDecoration(
-                            color: primary,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.check_rounded,
-                            size: 14,
-                            color: Colors.white,
-                          ),
+                  ),
+                  if (selected)
+                    Positioned(
+                      top: 4,
+                      right: 4,
+                      child: Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: BoxDecoration(
+                          color: primary,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.check_rounded,
+                          size: 14,
+                          color: Colors.white,
                         ),
                       ),
-                  ],
-                ),
+                    ),
+                ],
               ),
             ),
             const SizedBox(height: 4),

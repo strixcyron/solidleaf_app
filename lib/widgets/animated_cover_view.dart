@@ -88,14 +88,26 @@ class _AnimatedCoverViewState extends State<AnimatedCoverView> {
   Widget build(BuildContext context) {
     final controller = _controller;
     if (_useVideo && _videoReady && !_videoFailed && controller != null) {
-      // Растягиваем видео по размеру баннера с обрезкой (cover).
-      return FittedBox(
-        fit: BoxFit.cover,
-        clipBehavior: Clip.hardEdge,
-        child: SizedBox(
-          width: controller.value.size.width,
-          height: controller.value.size.height,
-          child: VideoPlayer(controller),
+      final videoSize = controller.value.size;
+      // До первого кадра размер может быть 0×0 — не рисуем «кривое» превью.
+      if (videoSize.width <= 0 || videoSize.height <= 0) {
+        return widget.imageFallback;
+      }
+
+      // BoxFit.cover внутри ограниченного баннера/превью: без expand FittedBox
+      // может сжиматься и давать полосы или смещение.
+      return ClipRect(
+        child: SizedBox.expand(
+          child: FittedBox(
+            fit: BoxFit.cover,
+            alignment: Alignment.center,
+            clipBehavior: Clip.hardEdge,
+            child: SizedBox(
+              width: videoSize.width,
+              height: videoSize.height,
+              child: VideoPlayer(controller),
+            ),
+          ),
         ),
       );
     }

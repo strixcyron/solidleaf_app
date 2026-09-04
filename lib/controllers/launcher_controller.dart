@@ -1418,9 +1418,18 @@ class LauncherController extends ChangeNotifier {
     // Не сохраняем некорректный путь — иначе установка уйдёт «в никуда».
     final error = GamePathFinder.validationError(selected);
     if (error != null) {
-      lastUserError = error;
-      statusText = error;
-      addLog('Выбор папки отклонён: $error');
+      final facing = UserFacingError(
+        title: 'Неверная папка игры',
+        summary: error,
+        steps: const [
+          'Выберите каталог, где лежит reverse1999_Data',
+          'Или запустите игру — лаунчер может найти путь сам',
+        ],
+      );
+      lastUserFacingError = facing;
+      lastUserError = facing.flatMessage;
+      statusText = facing.summary;
+      addLog('Выбор папки отклонён: ${facing.summary}');
       notifyListeners();
       return;
     }
@@ -1431,6 +1440,7 @@ class LauncherController extends ChangeNotifier {
     _refreshInstallPathState();
     stopGameProcessWatch();
     lastUserError = null;
+    lastUserFacingError = null;
     addLog('Папка игры: $installPath');
     notifyListeners();
   }
@@ -1556,6 +1566,7 @@ class LauncherController extends ChangeNotifier {
         addLog('Обновлений не требуется. Установка уже актуальна.');
         statusText = 'Установлена актуальная версия';
         lastUserError = null;
+        lastUserFacingError = null;
         notifyListeners();
         return;
       }
@@ -1752,6 +1763,7 @@ class LauncherController extends ChangeNotifier {
       statusText = kind == 'art'
           ? 'Установка текстур завершена'
           : 'Установка завершена';
+      _pausedDuringDownload = false;
       notifyListeners();
       await Future<void>.delayed(const Duration(milliseconds: 280));
       isDownloading = false;
@@ -1760,20 +1772,22 @@ class LauncherController extends ChangeNotifier {
       addLog(
         kind == 'art'
             ? 'Установка графики и текстур завершена.'
-            : 'Развёртывание файлов закончено.',
+            : 'Установка текста завершена.',
       );
       notifyListeners();
     } on DioException catch (error) {
+      final interrupted = _pausedDuringDownload;
+      _pausedDuringDownload = false;
       isDownloading = false;
       downloadingKind = null;
-      lastUserError = describeInstallError(
-        PatchInstallException(
-          error.message ?? 'Ошибка загрузки: ${error.toString()}',
-        ),
+      final facing = describeInstallErrorDetailed(
+        error,
+        interruptedByBackground: interrupted,
       );
-      _handleDioError(error);
-      // Дополняем lastUserError из statusText, если Dio handler его выставил.
-      lastUserError ??= statusText;
+      lastUserFacingError = facing;
+      lastUserError = facing.flatMessage;
+      statusText = facing.summary;
+      addLog('${facing.title}: ${facing.summary}');
       notifyListeners();
     } on FileSystemException catch (e) {
       _failInstall(e);
@@ -1824,18 +1838,45 @@ class LauncherController extends ChangeNotifier {
   /// Последняя ошибка установки для AlertDialog (null = успеха/нет ошибки).
   String? lastUserError;
 
+  /// Структурированная ошибка (заголовок + шаги) для красивого диалога.
+  UserFacingError? lastUserFacingError;
+
+  /// Пользователь свернул приложение во время скачивания/установки.
+  bool _pausedDuringDownload = false;
+
+  /// Вызывать из UI при сворачивании / паузе приложения.
+  void onAppPaused() {
+    if (isDownloading) {
+      _pausedDuringDownload = true;
+    }
+  }
+
+  /// Вызывать из UI при возврате в приложение.
+  void onAppResumed() {
+    // Флаг сбрасываем только после завершения операции в _failInstall / success.
+  }
+
   void _resetInstallUiState() {
     lastInstallSource = null;
     lastInstallTarget = null;
     lastInstallFileCount = 0;
     lastUserError = null;
+    lastUserFacingError = null;
   }
 
   void _failInstall(Object error, {String? pathHint}) {
-    final message = describeInstallError(error, pathHint: pathHint);
-    lastUserError = message;
-    statusText = message;
-    addLog(message);
+    final interrupted = _pausedDuringDownload;
+    _pausedDuringDownload = false;
+    final facing = describeInstallErrorDetailed(
+      error,
+      pathHint: pathHint,
+      interruptedByBackground: interrupted,
+    );
+    lastUserFacingError = facing;
+    lastUserError = facing.flatMessage;
+    statusText = facing.summary;
+    // В лог — кратко, без стека.
+    addLog('${facing.title}: ${facing.summary}');
     isDownloading = false;
     downloadingKind = null;
     notifyListeners();
@@ -1849,7 +1890,9 @@ class LauncherController extends ChangeNotifier {
     if (Platform.isAndroid) {
       if (!isShizukuActive) {
         addLog('Shizuku не активен — установка на Android невозможна');
-        throw Exception('Shizuku required for Android install');
+        throw PatchInstallException(
+          'Shizuku не запущен. Откройте Shizuku, нажмите Start и повторите.',
+        );
       }
       await _ensureFileService();
 
@@ -2134,19 +2177,31 @@ class LauncherController extends ChangeNotifier {
       }
 
       isShizukuActive = active;
-      statusText = status;
+      // Статус Shizuku только в чипе UI — не затираем operational statusText.
+      if (!_isShizukuStatusText(statusText) && !isDownloading) {
+        // оставляем как есть
+      } else if (_isShizukuStatusText(statusText) && !isDownloading) {
+        statusText = 'Готово';
+      }
       addLog(status);
       notifyListeners();
       return active;
     } on PlatformException catch (error) {
       isShizukuActive = false;
-      statusText = 'Shizuku не активен';
+      if (_isShizukuStatusText(statusText)) {
+        statusText = 'Готово';
+      }
       addLog(
-        'Проверка Shizuku завершилась ошибкой: ${error.message ?? 'unknown'}',
+        'Проверка Shizuku: ${error.message ?? 'не удалось проверить'}',
       );
       notifyListeners();
       return false;
     }
+  }
+
+  bool _isShizukuStatusText(String text) {
+    final t = text.trim().toLowerCase();
+    return t.startsWith('shizuku');
   }
 
   bool _isVersionNewer(String remote, String local) {
@@ -2182,49 +2237,9 @@ class LauncherController extends ChangeNotifier {
   }
 
   void _handleDioError(DioException exception) {
-    String message = 'Не удалось выполнить запрос';
-
-    if (exception.type == DioExceptionType.connectionTimeout) {
-      message = 'Таймаут соединения. Проверьте интернет-подключение.';
-    } else if (exception.type == DioExceptionType.receiveTimeout) {
-      message = 'Сервер долго отвечает.';
-    } else if (exception.type == DioExceptionType.connectionError) {
-      message = 'Нет интернет-соединения или сервер недоступен.';
-    } else if (exception.response?.statusCode == 401) {
-      message =
-          'GitHub отклонил запрос. Повторите проверку без лишнего токена.';
-    } else if (exception.response?.statusCode == 403) {
-      message = 'GitHub API ограничил число запросов. Попробуйте позже.';
-    } else if (exception.response?.statusCode == 404) {
-      final sentAuth = exception.requestOptions.headers.containsKey(
-        'Authorization',
-      );
-      final ghMessage = exception.response?.data is Map
-          ? (exception.response!.data as Map)['message']?.toString()
-          : null;
-      final path = exception.requestOptions.uri.path;
-      final isAssetDownload =
-          path.contains('/releases/assets/') ||
-          path.contains('/releases/download/');
-      if (isPremium && isAssetDownload) {
-        message =
-            'Не удалось скачать файл из $_activeReleaseRepoLabel (404). '
-            'GitHub: "${ghMessage ?? "Not Found"}", auth=$sentAuth. '
-            '[${GitHubConfig.debugState}]';
-      } else if (isPremium) {
-        message =
-            'Премиум-релиз в $_activeReleaseRepoLabel недоступен (404). '
-            'GitHub: "${ghMessage ?? "Not Found"}", auth=$sentAuth. '
-            '[${GitHubConfig.debugState}]';
-      } else {
-        message = 'Релиз не найден в репозитории $_activeReleaseRepoLabel.';
-      }
-    } else if (exception.error != null) {
-      message = exception.error.toString();
-    }
-
-    statusText = message;
-    addLog(message);
+    final facing = describeInstallErrorDetailed(exception);
+    statusText = facing.summary;
+    addLog('${facing.title}: ${facing.summary}');
     notifyListeners();
   }
 }

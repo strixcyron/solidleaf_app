@@ -11,6 +11,7 @@ import '../config/app_constants.dart';
 import '../controllers/launcher_controller.dart';
 import '../data/animated_covers.dart';
 import '../telegram_auth_service.dart';
+import '../utils/install_errors.dart';
 import '../widgets/animated_cover_view.dart';
 import '../widgets/effects/animated_status_badge.dart';
 import '../widgets/effects/arcane_hover_border.dart';
@@ -21,6 +22,7 @@ import '../widgets/effects/rain_glass_overlay.dart';
 import '../widgets/effects/staggered_fade_in.dart';
 import '../widgets/launcher_version_badge.dart';
 import '../widgets/mini_player.dart';
+import '../widgets/remove_localization_dialog.dart';
 import '../widgets/welcome_dialog.dart';
 import 'about_project_page.dart';
 import 'settings_page.dart';
@@ -123,8 +125,10 @@ class _MainScreenState extends State<MainScreen>
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.hidden) {
+      controller.onAppPaused();
       controller.pauseGameProcessWatch();
     } else if (state == AppLifecycleState.resumed) {
+      controller.onAppResumed();
       controller.resumeGameProcessWatch();
     }
   }
@@ -413,46 +417,21 @@ class _MainScreenState extends State<MainScreen>
       if (!mounted) return;
 
       if (controller.lastUserError != null) {
-        await _showInstallErrorDialog(controller.lastUserError!);
+        await _showInstallErrorDialog(
+          controller.lastUserFacingError ??
+              describeInstallErrorDetailed(controller.lastUserError!),
+        );
         return;
       }
 
-      final src = controller.lastInstallSource;
-      if (src != null) {
+      if (controller.lastInstallSource != null) {
         await showConfettiBurst(context);
         if (!mounted) return;
-        final tgt = controller.lastInstallTarget ?? '';
-        final count = controller.lastInstallFileCount;
-        await showDialog<void>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            backgroundColor: Theme.of(context).cardColor,
-            title: Text(
-              'Установка успешно завершена',
-              style: TextStyle(
-                color: Theme.of(context).textTheme.bodyMedium?.color,
-              ),
-            ),
-            content: Text(
-              'Откуда: $src\nКуда: $tgt\nСкопировано файлов: $count',
-              style: TextStyle(
-                color: Theme.of(context).textTheme.bodySmall?.color,
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('ОК'),
-              ),
-            ],
-          ),
-        );
+        _showSuccessSnackBar('Готово 🎉  Текстовая локализация установлена');
       }
     } catch (e) {
       if (!mounted) return;
-      await _showInstallErrorDialog(
-        e.toString().replaceFirst(RegExp(r'^Exception:\s*'), ''),
-      );
+      await _showInstallErrorDialog(describeInstallErrorDetailed(e));
     }
   }
 
@@ -466,51 +445,56 @@ class _MainScreenState extends State<MainScreen>
       if (!mounted) return;
 
       if (controller.lastUserError != null) {
-        await _showInstallErrorDialog(controller.lastUserError!);
+        await _showInstallErrorDialog(
+          controller.lastUserFacingError ??
+              describeInstallErrorDetailed(controller.lastUserError!),
+        );
         return;
       }
 
-      final src = controller.lastInstallSource;
-      if (src != null) {
+      if (controller.lastInstallSource != null) {
         await showConfettiBurst(context);
         if (!mounted) return;
-        final tgt = controller.lastInstallTarget ?? '';
-        final count = controller.lastInstallFileCount;
-        await showDialog<void>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            backgroundColor: Theme.of(context).cardColor,
-            title: Text(
-              'Текстуры установлены',
-              style: TextStyle(
-                color: Theme.of(context).textTheme.bodyMedium?.color,
-              ),
-            ),
-            content: Text(
-              'Откуда: $src\nКуда: $tgt\nСкопировано файлов: $count',
-              style: TextStyle(
-                color: Theme.of(context).textTheme.bodySmall?.color,
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('ОК'),
-              ),
-            ],
-          ),
-        );
+        _showSuccessSnackBar('Готово 🎉  Графика и текстуры установлены');
       }
     } catch (e) {
       if (!mounted) return;
-      await _showInstallErrorDialog(
-        e.toString().replaceFirst(RegExp(r'^Exception:\s*'), ''),
-      );
+      await _showInstallErrorDialog(describeInstallErrorDetailed(e));
     }
   }
 
-  /// Диалог ошибки установки — процесс лаунчера не завершается.
-  Future<void> _showInstallErrorDialog(String message) async {
+  void _showSuccessSnackBar(String message) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    messenger.clearSnackBars();
+    messenger.showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+        backgroundColor: const Color(0xFF1B4332),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle_rounded, color: Color(0xFF95D5B2)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  /// Диалог ошибки установки — без сырых Exception / стеков.
+  Future<void> _showInstallErrorDialog(UserFacingError error) async {
     if (!mounted) return;
     await showDialog<void>(
       context: context,
@@ -525,7 +509,7 @@ class _MainScreenState extends State<MainScreen>
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                'Ошибка установки',
+                error.title,
                 style: TextStyle(
                   color: Theme.of(context).textTheme.bodyMedium?.color,
                 ),
@@ -533,17 +517,59 @@ class _MainScreenState extends State<MainScreen>
             ),
           ],
         ),
-        content: Text(
-          message,
-          style: TextStyle(
-            color: Theme.of(context).textTheme.bodySmall?.color,
-            height: 1.35,
-          ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              error.summary,
+              style: TextStyle(
+                color: Theme.of(context).textTheme.bodySmall?.color,
+                height: 1.4,
+              ),
+            ),
+            if (error.steps.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Text(
+                'Что сделать',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: Theme.of(context).textTheme.bodyMedium?.color,
+                ),
+              ),
+              const SizedBox(height: 8),
+              for (var i = 0; i < error.steps.length; i++) ...[
+                if (i > 0) const SizedBox(height: 6),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${i + 1}.',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        error.steps[i],
+                        style: TextStyle(
+                          color: Theme.of(context).textTheme.bodySmall?.color,
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('ОК'),
+            child: const Text('Понятно'),
           ),
         ],
       ),
@@ -846,6 +872,7 @@ class _MainScreenState extends State<MainScreen>
   Widget _buildHeroSection(
     LauncherController controller, {
     bool showSocialInCorners = false,
+    bool showAboutButton = false,
     bool highlightCta = false,
   }) {
     return Column(
@@ -855,6 +882,7 @@ class _MainScreenState extends State<MainScreen>
           controller,
           height: 200,
           showSocialInCorners: showSocialInCorners,
+          showAboutButton: showAboutButton,
         ),
         const SizedBox(height: 14),
         Row(
@@ -1047,6 +1075,24 @@ class _MainScreenState extends State<MainScreen>
     );
   }
 
+  /// Лёгкая тень карточки: работает и в светлой, и в Material You теме.
+  List<BoxShadow> _cardShadows(BuildContext context) {
+    final shadow = Theme.of(context).colorScheme.shadow;
+    return [
+      BoxShadow(
+        color: shadow.withValues(alpha: 0.10),
+        blurRadius: 12,
+        offset: const Offset(0, 4),
+      ),
+    ];
+  }
+
+  /// Статус про Shizuku — на Android его показывает чип в шапке, не эта строка.
+  bool _isShizukuStatusText(String text) {
+    final t = text.trim().toLowerCase();
+    return t.startsWith('shizuku');
+  }
+
   Widget _buildSettingsCard(LauncherController controller) {
     final isPremium = controller.isPremium;
     final isAndroidUi = Platform.isAndroid;
@@ -1057,6 +1103,8 @@ class _MainScreenState extends State<MainScreen>
         : Icons.person_rounded;
     final accountLabel =
         isPremium ? 'Премиум доступ' : 'Обычный доступ';
+    final showStatus = !(isAndroidUi &&
+        _isShizukuStatusText(controller.statusText));
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -1067,6 +1115,7 @@ class _MainScreenState extends State<MainScreen>
           color: Theme.of(context).dividerColor.withValues(alpha: 0.9),
           width: 1,
         ),
+        boxShadow: _cardShadows(context),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1104,6 +1153,16 @@ class _MainScreenState extends State<MainScreen>
                 color: Theme.of(context).dividerColor,
               ),
             ),
+            Text(
+              'Папка игры',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.2,
+                color: Theme.of(context).textTheme.bodySmall?.color,
+              ),
+            ),
+            const SizedBox(height: 8),
             Row(
               children: [
                 Icon(
@@ -1142,7 +1201,12 @@ class _MainScreenState extends State<MainScreen>
                     await controller.selectInstallPath();
                     if (!mounted) return;
                     if (controller.lastUserError != null) {
-                      await _showInstallErrorDialog(controller.lastUserError!);
+                      await _showInstallErrorDialog(
+                        controller.lastUserFacingError ??
+                            describeInstallErrorDetailed(
+                              controller.lastUserError!,
+                            ),
+                      );
                     }
                   },
                   icon: Icon(
@@ -1160,132 +1224,26 @@ class _MainScreenState extends State<MainScreen>
               _buildGamePathOnboardingBanner(controller),
             ],
           ],
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 10),
-            child: Divider(
-              height: 1,
-              color: Theme.of(context).dividerColor,
+          if (showStatus) ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: Divider(
+                height: 1,
+                color: Theme.of(context).dividerColor,
+              ),
             ),
-          ),
-          Text(
-            controller.statusText,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-              color: Theme.of(context).textTheme.bodyMedium?.color,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _showRemoveBackupDialog(LauncherController controller) async {
-    final choice = await showDialog<String?>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Theme.of(context).cardColor,
-        title: Text(
-          'Удалить/восстановить',
-          style: TextStyle(
-            color: Theme.of(context).textTheme.bodyMedium?.color,
-          ),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
             Text(
-              'Выберите, что вы хотите удалить из установки:',
+              controller.statusText,
               style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
                 color: Theme.of(context).textTheme.bodyMedium?.color,
               ),
             ),
-            const SizedBox(height: 12),
-            ElevatedButton(
-              onPressed: () => Navigator.of(ctx).pop('text'),
-              child: const Text('Удалить русификатор текста'),
-            ),
-            const SizedBox(height: 8),
-            ElevatedButton(
-              onPressed: () => Navigator.of(ctx).pop('art'),
-              child: const Text('Удалить русификатор текстур'),
-            ),
-            const SizedBox(height: 8),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.redAccent,
-              ),
-              onPressed: () => Navigator.of(ctx).pop('all'),
-              child: const Text(
-                'Удалить всё',
-                style: TextStyle(color: Colors.white),
-              ),
-            ),
           ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(null),
-            child: const Text('Отмена'),
-          ),
         ],
       ),
     );
-
-    if (!mounted) return;
-    if (choice == null) return;
-
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (c2) => AlertDialog(
-        backgroundColor: Theme.of(context).cardColor,
-        title: Text(
-          'Подтвердите действие',
-          style: TextStyle(
-            color: Theme.of(context).textTheme.bodyMedium?.color,
-          ),
-        ),
-        content: Text(
-          'Вы уверены, что хотите выполнить действие: ${choice == 'all'
-              ? 'Удалить всё'
-              : choice == 'art'
-                  ? 'Удалить текстуры'
-                  : 'Удалить текст'}?',
-          style: TextStyle(
-            color: Theme.of(context).textTheme.bodySmall?.color,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(c2).pop(false),
-            child: const Text('Отмена'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(c2).pop(true),
-            child: const Text('Выполнить'),
-          ),
-        ],
-      ),
-    );
-
-    if (!mounted) return;
-    if (confirmed != true) return;
-
-    try {
-      await controller.restoreBackupKind(choice);
-      if (!mounted || messenger == null) return;
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Операция удаления/восстановления завершена'),
-        ),
-      );
-    } catch (e) {
-      if (!mounted || messenger == null) return;
-      messenger.showSnackBar(
-        SnackBar(content: Text('Ошибка: ${e.toString()}')),
-      );
-    }
   }
 
   /// Confirms, then clears the stored Telegram JWT and sends the user back
@@ -1414,32 +1372,9 @@ class _MainScreenState extends State<MainScreen>
                     : 'Переключить на тёмную тему',
               ),
               const Spacer(),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 16),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _buildSocialIconButton(
-                      assetName: 'boosty_icon.png',
-                      icon: Icons.stars_rounded,
-                      label: 'Boosty',
-                      tooltip: 'Boosty',
-                      size: 52,
-                      onTap: () => _openExternalLink(boostyUrl),
-                    ),
-                    const SizedBox(height: 16),
-                    _buildSocialIconButton(
-                      assetName: 'telegram_icon.png',
-                      icon: Icons.send_rounded,
-                      label: 'Telegram',
-                      tooltip: 'Telegram',
-                      size: 52,
-                      onTap: () => _openExternalLink(telegramUrl),
-                    ),
-                    const SizedBox(height: 16),
-                    const LauncherVersionBadge(compact: true),
-                  ],
-                ),
+              const Padding(
+                padding: EdgeInsets.only(bottom: 16),
+                child: LauncherVersionBadge(compact: true),
               ),
             ],
           ),
@@ -1480,7 +1415,6 @@ class _MainScreenState extends State<MainScreen>
                     child: _buildGameListTile(controller, _libraryGames[i]),
                   ),
                 ),
-              _buildLibraryActivityCard(controller),
               const Spacer(),
               const MiniPlayer(),
             ],
@@ -1512,6 +1446,8 @@ class _MainScreenState extends State<MainScreen>
                       ),
                       const SizedBox(height: 18),
                       _buildSettingsCard(controller),
+                      const SizedBox(height: 12),
+                      _buildLibraryActivityCard(controller),
                       const SizedBox(height: 20),
                       Text(
                         'Компоненты',
@@ -1527,7 +1463,8 @@ class _MainScreenState extends State<MainScreen>
                       _buildComponentTile(
                         icon: Icons.image_rounded,
                         title: 'Графика и текстуры',
-                        subtitle: 'Локализация интерфейса и графических файлов',
+                        subtitle:
+                            'Локализация интерфейса и графических файлов',
                         trailing: controller.isPremium
                             ? _buildArtVersionBadge(controller)
                             : _buildPremiumLockBadge(),
@@ -1535,23 +1472,10 @@ class _MainScreenState extends State<MainScreen>
                         premiumLocked: !controller.isPremium,
                         showDownloadProgress: controller.isDownloadingArt,
                         downloadProgress: controller.downloadProgress,
+                        showRemoveMenu: true,
                         onTap: controller.isPremium
                             ? null
                             : () => _showPremiumLockDialog(controller),
-                      ),
-                      const SizedBox(height: 16),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton.icon(
-                          onPressed: () =>
-                              _showRemoveBackupDialog(controller),
-                          icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                          label: const Text('Удалить русификатор'),
-                          style: TextButton.styleFrom(
-                            foregroundColor:
-                                Theme.of(context).textTheme.bodySmall?.color,
-                          ),
-                        ),
                       ),
                     ],
                   ),
@@ -1565,30 +1489,36 @@ class _MainScreenState extends State<MainScreen>
   }
 
   Widget _buildAndroidLayout(LauncherController controller) {
+    // Нижний inset — чтобы «Удалить» и версия не прятались за навигацией.
+    final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
+    final shizukuActive = controller.isShizukuActive;
+    final shizukuLabel =
+        shizukuActive ? 'Shizuku (активен)' : 'Shizuku (не запущен)';
+
     return Padding(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
       child: SingleChildScrollView(
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const SizedBox(height: 20),
+            const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
-                  child: Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          'SOLIDLEAF TEAM',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: Theme.of(context).textTheme.bodyMedium?.color,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
+                  child: Text(
+                    'SOLIDLEAF',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).textTheme.bodyMedium?.color,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
+                ),
+                _ShizukuStatusChip(
+                  active: shizukuActive,
+                  label: shizukuLabel,
+                  onTap: () => _showShizukuGuide(controller),
                 ),
                 IconButton(
                   icon: Icon(
@@ -1599,66 +1529,22 @@ class _MainScreenState extends State<MainScreen>
                   onPressed: controller.toggleTheme,
                   tooltip: 'Сменить тему',
                 ),
-                ElevatedButton.icon(
-                  onPressed: () => _showShizukuGuide(controller),
-                  icon: const Icon(Icons.security_rounded),
-                  label: const Text('Shizuku'),
+                IconButton(
+                  icon: const Icon(Icons.settings_rounded),
+                  onPressed: _openSettingsPage,
+                  tooltip: 'Настройки',
                 ),
               ],
             ),
             const SizedBox(height: 16),
             _buildHeroSection(
               controller,
-              showSocialInCorners: true,
+              showSocialInCorners: false,
+              showAboutButton: true,
               highlightCta: _ctaHighlight,
             ),
             const SizedBox(height: 16),
             _buildSettingsCard(controller),
-            if (!controller.isShizukuActive)
-              Container(
-                margin: const EdgeInsets.only(top: 10),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.error.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.error.withValues(alpha: 0.35),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.error_outline_rounded,
-                      color: Theme.of(context).colorScheme.error,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Shizuku не активен — установка на Android невозможна',
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    TextButton(
-                      onPressed: () => _showShizukuGuide(controller),
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        minimumSize: const Size(0, 32),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      child: const Text('Как настроить?'),
-                    ),
-                  ],
-                ),
-              ),
             const SizedBox(height: 16),
             Text(
               'Компоненты',
@@ -1687,40 +1573,19 @@ class _MainScreenState extends State<MainScreen>
                   : () => _showPremiumLockDialog(controller),
             ),
             const SizedBox(height: 24),
-            Row(
-              children: [
-                Text(
-                  'Музыка',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: Theme.of(context).textTheme.bodyMedium?.color,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Icon(
-                  Icons.music_note_rounded,
-                  size: 16,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-              ],
+            Text(
+              'Музыка',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: Theme.of(context).textTheme.bodyMedium?.color,
+              ),
             ),
             const SizedBox(height: 12),
             const MiniPlayer(useCardColor: true, collapsible: true),
-            const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                TextButton.icon(
-                  onPressed: () => _showRemoveBackupDialog(controller),
-                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                  label: const Text('Удалить русификатор'),
-                ),
-                const SizedBox(width: 10),
-                const LauncherVersionBadge(),
-              ],
-            ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 16),
+            const Center(child: LauncherVersionBadge()),
+            SizedBox(height: 12 + bottomInset),
           ],
         ),
       ),
@@ -1783,6 +1648,7 @@ class _MainScreenState extends State<MainScreen>
     LauncherController controller, {
     double height = 180,
     bool showSocialInCorners = false,
+    bool showAboutButton = false,
   }) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(20),
@@ -1844,7 +1710,7 @@ class _MainScreenState extends State<MainScreen>
                 ],
               ),
             ),
-            if (showSocialInCorners)
+            if (showAboutButton || showSocialInCorners)
               Positioned(
                 top: 10,
                 left: 10,
@@ -2326,6 +2192,7 @@ class _MainScreenState extends State<MainScreen>
       showDownloadProgress: controller.isDownloadingText,
       downloadProgress: controller.downloadProgress,
       footer: isFree ? _buildPartialTextHint() : null,
+      showRemoveMenu: !Platform.isAndroid,
       onTap: isFree ? () => _showPartialTextDialog(controller) : null,
     );
   }
@@ -2410,6 +2277,7 @@ class _MainScreenState extends State<MainScreen>
     bool premiumLocked = false,
     bool showDownloadProgress = false,
     double downloadProgress = 0,
+    bool showRemoveMenu = false,
     VoidCallback? onTap,
   }) {
     final borderColor = premiumLocked
@@ -2424,6 +2292,7 @@ class _MainScreenState extends State<MainScreen>
           color: Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: borderColor, width: 1),
+          boxShadow: _cardShadows(context),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2458,6 +2327,25 @@ class _MainScreenState extends State<MainScreen>
                   ),
                 ),
                 if (trailing != null) trailing,
+                if (showRemoveMenu)
+                  PopupMenuButton<String>(
+                    tooltip: 'Действия',
+                    icon: Icon(
+                      Icons.more_vert_rounded,
+                      color: Theme.of(context).textTheme.bodySmall?.color,
+                    ),
+                    onSelected: (value) {
+                      if (value == 'remove') {
+                        showRemoveLocalizationDialog(context);
+                      }
+                    },
+                    itemBuilder: (ctx) => const [
+                      PopupMenuItem(
+                        value: 'remove',
+                        child: Text('Удалить русификатор…'),
+                      ),
+                    ],
+                  ),
               ],
             ),
             if (footer != null) ...[
@@ -2697,5 +2585,144 @@ class _MainScreenState extends State<MainScreen>
     }
 
     return Tooltip(message: tooltip, child: button);
+  }
+}
+
+/// Компактный чип Shizuku: зелёный — активен, красная пульсирующая обводка — нет.
+class _ShizukuStatusChip extends StatefulWidget {
+  const _ShizukuStatusChip({
+    required this.active,
+    required this.label,
+    required this.onTap,
+  });
+
+  final bool active;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  State<_ShizukuStatusChip> createState() => _ShizukuStatusChipState();
+}
+
+class _ShizukuStatusChipState extends State<_ShizukuStatusChip>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1100),
+    );
+    if (!widget.active) _pulse.repeat(reverse: true);
+  }
+
+  @override
+  void didUpdateWidget(covariant _ShizukuStatusChip oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.active && _pulse.isAnimating) {
+      _pulse.stop();
+      _pulse.value = 0;
+    } else if (!widget.active && !_pulse.isAnimating) {
+      _pulse.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dot = widget.active
+        ? const Color(0xFF22C55E)
+        : const Color(0xFFEF4444);
+    final baseBorder = widget.active
+        ? Theme.of(context).dividerColor.withValues(alpha: 0.9)
+        : const Color(0xFFEF4444).withValues(alpha: 0.55);
+
+    return AnimatedBuilder(
+      animation: _pulse,
+      builder: (context, child) {
+        final pulseAlpha = widget.active ? 0.0 : (0.35 + _pulse.value * 0.55);
+        return Container(
+          margin: const EdgeInsets.only(right: 2),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: widget.active
+                ? null
+                : [
+                    BoxShadow(
+                      color: const Color(0xFFEF4444).withValues(alpha: pulseAlpha * 0.45),
+                      blurRadius: 6 + _pulse.value * 4,
+                      spreadRadius: _pulse.value * 0.6,
+                    ),
+                  ],
+          ),
+          child: child,
+        );
+      },
+      child: Material(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(20),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: widget.onTap,
+          child: AnimatedBuilder(
+            animation: _pulse,
+            builder: (context, _) {
+              final borderColor = widget.active
+                  ? baseBorder
+                  : Color.lerp(
+                      const Color(0xFFEF4444).withValues(alpha: 0.45),
+                      const Color(0xFFEF4444),
+                      _pulse.value,
+                    )!;
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: borderColor,
+                    width: widget.active ? 1 : 1.4,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: dot,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: dot.withValues(alpha: 0.45),
+                            blurRadius: 4,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      widget.label,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: Theme.of(context).textTheme.bodyMedium?.color,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
   }
 }
