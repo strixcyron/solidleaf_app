@@ -532,8 +532,14 @@ class LauncherController extends ChangeNotifier {
     }
 
     final saved = prefs.getString(GamePathFinder.prefsKey);
-    if (saved != null && GamePathFinder.isValidGamePath(saved)) {
-      return saved;
+    if (saved != null) {
+      final resolved = GamePathFinder.resolveGameRoot(saved);
+      if (resolved != null) {
+        if (resolved != saved) {
+          await prefs.setString(GamePathFinder.prefsKey, resolved);
+        }
+        return resolved;
+      }
     }
 
     if (Platform.isWindows) {
@@ -549,7 +555,8 @@ class LauncherController extends ChangeNotifier {
   }
 
   String _windowsInstallPathPlaceholder() {
-    return 'Укажите путь к игре, например: D:\\Games\\reverse1999_global';
+    return 'Укажите путь к игре, например: '
+        'E:\\Games\\reverse1999_global\\Reverse1999en';
   }
 
   void _refreshInstallPathState() {
@@ -1416,13 +1423,20 @@ class LauncherController extends ChangeNotifier {
     }
 
     // Не сохраняем некорректный путь — иначе установка уйдёт «в никуда».
-    final error = GamePathFinder.validationError(selected);
-    if (error != null) {
+    // Родительская обёртка (Games\reverse1999_global) резолвится во вложенный корень.
+    final resolved = GamePathFinder.resolveGameRoot(selected);
+    final error = resolved == null
+        ? GamePathFinder.validationError(selected)
+        : null;
+    if (error != null || resolved == null) {
       final facing = UserFacingError(
         title: 'Неверная папка игры',
-        summary: error,
+        summary: error ??
+            'В выбранной папке нет reverse1999_Data. '
+                'Укажите Reverse1999en или корень Steam-версии.',
         steps: const [
-          'Выберите каталог, где лежит reverse1999_Data',
+          'Выберите каталог, где лежит reverse1999_Data '
+              '(часто …\\reverse1999_global\\Reverse1999en)',
           'Или запустите игру — лаунчер может найти путь сам',
         ],
       );
@@ -1434,9 +1448,9 @@ class LauncherController extends ChangeNotifier {
       return;
     }
 
-    installPath = selected;
+    installPath = resolved;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(GamePathFinder.prefsKey, selected);
+    await prefs.setString(GamePathFinder.prefsKey, resolved);
     _refreshInstallPathState();
     stopGameProcessWatch();
     lastUserError = null;
@@ -1508,7 +1522,8 @@ class LauncherController extends ChangeNotifier {
   }
 
   Future<void> _onGameProcessFound(String gameDir) async {
-    if (!GamePathFinder.isValidGamePath(gameDir)) {
+    final resolved = GamePathFinder.resolveGameRoot(gameDir);
+    if (resolved == null) {
       // Процесс есть, но рядом нет reverse1999_Data — продолжаем ждать.
       addLog(
         'Процесс найден ($gameDir), но нет ${GamePathFinder.dataFolderName} — продолжаем ожидание',
@@ -1516,7 +1531,10 @@ class LauncherController extends ChangeNotifier {
       startGameProcessWatch();
       return;
     }
-    await _applyDetectedGamePath(gameDir, source: 'процесс Reverse1999.exe');
+    await _applyDetectedGamePath(
+      resolved,
+      source: 'процесс reverse1999.exe',
+    );
   }
 
   Future<void> _applyDetectedGamePath(
@@ -1541,6 +1559,59 @@ class LauncherController extends ChangeNotifier {
         notifyListeners();
       }
     });
+  }
+
+  /// Запуск Reverse: 1999 (Windows — exe, Android — пакет игры).
+  Future<void> launchGame() async {
+    if (Platform.isAndroid) {
+      try {
+        const methodChannel = MethodChannel(shizukuChannel);
+        await methodChannel.invokeMethod<bool>('launchGame');
+        statusText = 'Игра запущена';
+        addLog('Запуск игры (Android): com.bluepoch.m.en.reverse1999');
+        notifyListeners();
+      } on PlatformException catch (e) {
+        throw Exception(
+          e.message?.isNotEmpty == true
+              ? e.message!
+              : 'Не удалось открыть игру. Убедитесь, что Reverse: 1999 установлена.',
+        );
+      }
+      return;
+    }
+
+    if (!isInstallPathValid) {
+      throw Exception(
+        'Укажите папку с установленной игрой '
+        '(нужна папка ${GamePathFinder.dataFolderName}).',
+      );
+    }
+
+    final exe = GamePathFinder.findGameExecutable(installPath);
+    if (exe == null) {
+      throw Exception(
+        'В папке игры не найден reverse1999.exe. '
+        'Проверьте путь установки.',
+      );
+    }
+
+    final root = GamePathFinder.resolveGameRoot(installPath) ?? installPath;
+    if (root != installPath) {
+      installPath = root;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(GamePathFinder.prefsKey, root);
+      _refreshInstallPathState();
+    }
+
+    await Process.start(
+      exe,
+      const <String>[],
+      workingDirectory: root,
+      mode: ProcessStartMode.detached,
+    );
+    statusText = 'Игра запущена';
+    addLog('Запуск игры: $exe');
+    notifyListeners();
   }
 
   Future<void> installOrUpdate() async {

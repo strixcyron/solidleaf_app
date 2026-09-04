@@ -138,17 +138,40 @@ class SettingsPage extends StatelessWidget {
               const SizedBox(height: 12),
               _settingsCard(
                 context,
-                child: ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    Icons.delete_outline_rounded,
-                    color: Theme.of(context).colorScheme.error,
-                  ),
-                  title: const Text('Удалить русификатор'),
-                  subtitle: const Text(
-                    'Восстановить оригинальные файлы игры из резервной копии',
-                  ),
-                  onTap: () => showRemoveLocalizationDialog(context),
+                child: Column(
+                  children: [
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        Icons.delete_outline_rounded,
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                      title: const Text('Удалить текстовую локализацию'),
+                      subtitle: const Text(
+                        'Восстановить оригинальные текстовые файлы из бэкапа',
+                      ),
+                      onTap: () => confirmAndRemoveComponent(
+                        context,
+                        kind: 'text',
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        Icons.image_not_supported_outlined,
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                      title: const Text('Удалить графику и текстуры'),
+                      subtitle: const Text(
+                        'Восстановить оригинальные графические файлы из бэкапа',
+                      ),
+                      onTap: () => confirmAndRemoveComponent(
+                        context,
+                        kind: 'art',
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],

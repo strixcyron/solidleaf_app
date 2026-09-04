@@ -123,6 +123,25 @@ class MainActivity : FlutterActivity() {
                         result.error("EXEC_ERROR", ex.message ?: "Unknown error", null)
                     }
                 }
+                "launchGame" -> {
+                    try {
+                        val pkg = "com.bluepoch.m.en.reverse1999"
+                        val launch = packageManager.getLaunchIntentForPackage(pkg)
+                        if (launch != null) {
+                            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(launch)
+                            result.success(true)
+                        } else {
+                            result.error(
+                                "NOT_INSTALLED",
+                                "Игра Reverse: 1999 не установлена на устройстве",
+                                null,
+                            )
+                        }
+                    } catch (ex: Exception) {
+                        result.error("LAUNCH_ERROR", ex.message ?: "Unknown error", null)
+                    }
+                }
                 "ensureFileService" -> ensureFileService(result)
                 "fsMkdirs" -> {
                     val path = call.arguments as? String ?: ""

@@ -689,10 +689,15 @@ class _MainScreenState extends State<MainScreen>
   }
 
   /// Главная кнопка: приоритет «Обновить» для установленных с апдейтом,
-  /// иначе установка / доустановка через диалог.
+  /// иначе установка / запуск игры.
   Future<void> _handlePrimaryAction(LauncherController controller) async {
     if (controller.hasAnyComponentUpdate) {
       await _runBatchUpdate(controller);
+      return;
+    }
+
+    if (controller.isTextInstalled) {
+      await _handleLaunchGame(controller);
       return;
     }
 
@@ -700,7 +705,67 @@ class _MainScreenState extends State<MainScreen>
       await _showInstallChoiceDialog(controller);
       return;
     }
-    // Всё установлено и актуально — кнопка disabled, сюда не попадаем.
+  }
+
+  /// Запуск игры; если нет текстур у Premium — предложить доустановить.
+  Future<void> _handleLaunchGame(LauncherController controller) async {
+    final offerTextures = controller.isPremium &&
+        controller.isTextInstalled &&
+        !controller.isTexturesInstalled;
+
+    if (offerTextures) {
+      final choice = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: Theme.of(context).cardColor,
+          title: Text(
+            'Установить текстуры?',
+            style: TextStyle(
+              color: Theme.of(context).textTheme.bodyMedium?.color,
+            ),
+          ),
+          content: Text(
+            'Текстовая локализация уже установлена. '
+            'Графика и текстуры сделают интерфейс игры полностью на русском. '
+            'Можно установить их сейчас или сразу продолжить запуск.',
+            style: TextStyle(
+              color: Theme.of(context).textTheme.bodySmall?.color,
+              height: 1.4,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop('launch'),
+              child: const Text('Продолжить запуск'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop('install_art'),
+              child: const Text('Установить текстуры'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || choice == null) return;
+      if (choice == 'install_art') {
+        await _runArtInstallFlow();
+        return;
+      }
+    }
+
+    try {
+      await controller.launchGame();
+    } catch (e) {
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger?.showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(
+            e.toString().replaceFirst(RegExp(r'^Exception:\s*'), ''),
+          ),
+        ),
+      );
+    }
   }
 
   /// Фоном обновляет только те УСТАНОВЛЕННЫЕ компоненты, где есть новая версия.
@@ -839,31 +904,36 @@ class _MainScreenState extends State<MainScreen>
     if (controller.hasAnyComponentUpdate) {
       return 'Обновить';
     }
+    if (controller.isTextInstalled) {
+      return 'Запустить игру';
+    }
     if (controller.isNothingInstalled) {
       return 'Установить';
     }
     if (!controller.isAllInstalled) {
-      if (controller.isTextInstalled && !controller.isTexturesInstalled) {
-        return controller.isPremium
-            ? 'Установить графику'
-            : 'Доустановить компоненты';
-      }
       if (!controller.isTextInstalled && controller.isTexturesInstalled) {
         return 'Установить текст';
       }
       return 'Доустановить компоненты';
     }
-    return 'Установлено';
+    return 'Запустить игру';
   }
 
   bool _primaryActionEnabled(LauncherController controller) {
     if (controller.isDownloading) return false;
     if (!Platform.isAndroid && !controller.isInstallPathValid) return false;
     if (controller.hasAnyComponentUpdate) return true;
+    if (controller.isTextInstalled) return true;
     if (controller.isNothingInstalled || !controller.isAllInstalled) {
       return true;
     }
     return false;
+  }
+
+  bool _isLaunchPrimaryAction(LauncherController controller) {
+    return !controller.isDownloading &&
+        !controller.hasAnyComponentUpdate &&
+        controller.isTextInstalled;
   }
 
   /// Оранжевый акцент для кнопки «Обновить».
@@ -893,6 +963,7 @@ class _MainScreenState extends State<MainScreen>
                 builder: (context) {
                   final isUpdateAction = !controller.isDownloading &&
                       controller.hasAnyComponentUpdate;
+                  final isLaunchAction = _isLaunchPrimaryAction(controller);
                   final accent = isUpdateAction
                       ? _updateAccent
                       : Theme.of(context).colorScheme.primary;
@@ -938,7 +1009,9 @@ class _MainScreenState extends State<MainScreen>
                                 ? Icons.downloading_rounded
                                 : isUpdateAction
                                     ? Icons.system_update_alt_rounded
-                                    : Icons.download_rounded,
+                                    : isLaunchAction
+                                        ? Icons.play_arrow_rounded
+                                        : Icons.download_rounded,
                             color: Colors.white,
                           ),
                           label: Text(
@@ -1103,8 +1176,10 @@ class _MainScreenState extends State<MainScreen>
         : Icons.person_rounded;
     final accountLabel =
         isPremium ? 'Премиум доступ' : 'Обычный доступ';
-    final showStatus = !(isAndroidUi &&
-        _isShizukuStatusText(controller.statusText));
+    // На ПК статус только в «Последняя активность» (ниже).
+    // На Android activity-карточки нет — статус остаётся здесь.
+    final showStatus = isAndroidUi &&
+        !_isShizukuStatusText(controller.statusText);
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -1472,7 +1547,14 @@ class _MainScreenState extends State<MainScreen>
                         premiumLocked: !controller.isPremium,
                         showDownloadProgress: controller.isDownloadingArt,
                         downloadProgress: controller.downloadProgress,
-                        showRemoveMenu: true,
+                        onRemove: !Platform.isAndroid &&
+                                controller.isPremium &&
+                                controller.isTexturesInstalled
+                            ? () => confirmAndRemoveComponent(
+                                  context,
+                                  kind: 'art',
+                                )
+                            : null,
                         onTap: controller.isPremium
                             ? null
                             : () => _showPremiumLockDialog(controller),
@@ -2192,7 +2274,9 @@ class _MainScreenState extends State<MainScreen>
       showDownloadProgress: controller.isDownloadingText,
       downloadProgress: controller.downloadProgress,
       footer: isFree ? _buildPartialTextHint() : null,
-      showRemoveMenu: !Platform.isAndroid,
+      onRemove: !Platform.isAndroid && controller.isTextInstalled
+          ? () => confirmAndRemoveComponent(context, kind: 'text')
+          : null,
       onTap: isFree ? () => _showPartialTextDialog(controller) : null,
     );
   }
@@ -2277,7 +2361,7 @@ class _MainScreenState extends State<MainScreen>
     bool premiumLocked = false,
     bool showDownloadProgress = false,
     double downloadProgress = 0,
-    bool showRemoveMenu = false,
+    VoidCallback? onRemove,
     VoidCallback? onTap,
   }) {
     final borderColor = premiumLocked
@@ -2327,24 +2411,14 @@ class _MainScreenState extends State<MainScreen>
                   ),
                 ),
                 if (trailing != null) trailing,
-                if (showRemoveMenu)
-                  PopupMenuButton<String>(
-                    tooltip: 'Действия',
+                if (onRemove != null)
+                  IconButton(
+                    tooltip: 'Удалить этот компонент',
+                    onPressed: onRemove,
                     icon: Icon(
-                      Icons.more_vert_rounded,
-                      color: Theme.of(context).textTheme.bodySmall?.color,
+                      Icons.delete_outline_rounded,
+                      color: Theme.of(context).colorScheme.error,
                     ),
-                    onSelected: (value) {
-                      if (value == 'remove') {
-                        showRemoveLocalizationDialog(context);
-                      }
-                    },
-                    itemBuilder: (ctx) => const [
-                      PopupMenuItem(
-                        value: 'remove',
-                        child: Text('Удалить русификатор…'),
-                      ),
-                    ],
                   ),
               ],
             ),
