@@ -1,11 +1,13 @@
 import 'dart:ui';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../config/github_config.dart';
 import '../controllers/launcher_controller.dart';
+import '../telegram_auth_config.dart';
 import '../telegram_auth_service.dart';
 import 'main_screen.dart';
 
@@ -29,11 +31,13 @@ class _AuthGateState extends State<AuthGate> {
 
   bool _isChecking = true;
   bool _isLoggedIn = false;
+  bool _launcherActive = true;
+  String _maintenanceMessage = '';
 
   @override
   void initState() {
     super.initState();
-    _checkStoredSession();
+    _bootstrap();
   }
 
   @override
@@ -42,13 +46,42 @@ class _AuthGateState extends State<AuthGate> {
     super.dispose();
   }
 
+  Future<void> _bootstrap() async {
+    await Future.wait([
+      _checkStoredSession(),
+      _checkLauncherStatus(),
+    ]);
+    if (!mounted) return;
+    setState(() => _isChecking = false);
+  }
+
   Future<void> _checkStoredSession() async {
     final loggedIn = await _authService.isLoggedIn();
     if (!mounted) return;
-    setState(() {
-      _isLoggedIn = loggedIn;
-      _isChecking = false;
-    });
+    setState(() => _isLoggedIn = loggedIn);
+  }
+
+  Future<void> _checkLauncherStatus() async {
+    try {
+      final dio = Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 8),
+          receiveTimeout: const Duration(seconds: 8),
+        ),
+      );
+      final res = await dio.get<Map<String, dynamic>>(
+        '${TelegramAuthConfig.baseUrl}/api/launcher/status',
+      );
+      final data = res.data ?? {};
+      if (!mounted) return;
+      setState(() {
+        _launcherActive = data['active'] as bool? ?? true;
+        _maintenanceMessage =
+            (data['maintenance_message'] as String?)?.trim() ?? '';
+      });
+    } catch (_) {
+      // При недоступности API не блокируем вход.
+    }
   }
 
   void _handleLoginSuccess() {
@@ -58,11 +91,66 @@ class _AuthGateState extends State<AuthGate> {
   @override
   Widget build(BuildContext context) {
     if (_isChecking) {
-      // Brief splash while we read the secure storage for a saved session.
       return const Scaffold(
         backgroundColor: Color(0xFF111019),
         body: Center(
           child: CircularProgressIndicator(color: Color(0xFF7B52F4)),
+        ),
+      );
+    }
+
+    if (!_launcherActive) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF111019),
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: Padding(
+              padding: const EdgeInsets.all(28),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(
+                    Icons.cloud_off_rounded,
+                    size: 56,
+                    color: Color(0xFF7B52F4),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Лаунчер временно недоступен',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Color(0xFFEEEEEE),
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    _maintenanceMessage.isNotEmpty
+                        ? _maintenanceMessage
+                        : 'Ведутся технические работы. Попробуйте позже.',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFFA09CB0),
+                      height: 1.45,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  TextButton.icon(
+                    onPressed: () async {
+                      setState(() => _isChecking = true);
+                      await _checkLauncherStatus();
+                      if (!mounted) return;
+                      setState(() => _isChecking = false);
+                    },
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Проверить снова'),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       );
     }
